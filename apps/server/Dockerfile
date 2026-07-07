@@ -5,6 +5,7 @@ WORKDIR /app
 
 COPY package.json bun.lock ./
 COPY apps/server/package.json apps/server/package.json
+COPY apps/web/package.json apps/web/package.json
 COPY packages/game-rules/package.json packages/game-rules/package.json
 RUN bun install --frozen-lockfile
 
