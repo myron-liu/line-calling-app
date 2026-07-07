@@ -179,23 +179,31 @@ export const routes: Route[] = [
   route("GET", "/tournaments/:id/roster", async (_req, { id }) =>
     json(await q.listTournamentRoster(id!)),
   ),
-  route("PUT", "/tournaments/:id/roster/:playerId", async (req, { id, playerId }) => {
-    const body = await parseBody(req, z.object({ present: z.boolean() }));
+  // Batched check-in: the client buffers present/injured taps in localStorage
+  // and flushes them here periodically (see apps/web's tournament-detail.tsx)
+  // instead of one request per tap. Applies all changes then re-syncs every
+  // game under the tournament once, and returns the resulting roster — the
+  // client just adopts whatever comes back rather than reconciling conflicts
+  // itself.
+  route("PUT", "/tournaments/:id/roster", async (req, { id }) => {
+    const body = await parseBody(
+      req,
+      z.object({
+        changes: z.array(
+          z.object({
+            playerId: z.string(),
+            present: z.boolean(),
+            injured: z.boolean(),
+          }),
+        ),
+      }),
+    );
     const tournament = await q.getTournament(id!);
     if (!tournament) return notFound();
-    await q.setTournamentPresence(id!, playerId!, body.present);
+    await q.batchUpdateTournamentRoster(id!, body.changes);
     await q.syncTournamentGameRosters(tournament.teamId, id!);
-    return json({ ok: true });
+    return json(await q.listTournamentRoster(id!));
   }),
-  route(
-    "PATCH",
-    "/tournaments/:id/roster/:playerId",
-    async (req, { id, playerId }) => {
-      const body = await parseBody(req, z.object({ injured: z.boolean() }));
-      await q.setTournamentInjured(id!, playerId!, body.injured);
-      return json({ ok: true });
-    },
-  ),
 
   // ── Saved lines ────────────────────────────────────────────────────────────
   route("GET", "/teams/:id/saved-lines", async (_req, { id }) =>

@@ -1,19 +1,24 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import type { Game, Player, Tournament } from "@shared/game-rules";
 import { readPlayers, readTeam } from "@/lib/storage/teams";
 import {
+  applyPendingRosterChanges,
   findTournament,
+  readPendingRosterChanges,
   readTournamentRoster,
-  setPlayerInjured,
-  setPlayerPresent,
+  syncTournamentRoster,
+  writePendingRosterChanges,
+  type PendingRosterChange,
   type TournamentRosterEntry,
 } from "@/lib/storage/tournaments";
 import { listTournamentGames } from "@/lib/storage/games";
 import { CreateGameForm } from "./create-game-form";
 import { GameList } from "./team-detail";
+
+const FLUSH_INTERVAL_MS = 30_000;
 
 export function TournamentDetail({ tournamentId }: { tournamentId: string }) {
   const [tournament, setTournament] = useState<Tournament | null | undefined>(
@@ -23,7 +28,10 @@ export function TournamentDetail({ tournamentId }: { tournamentId: string }) {
   const [players, setPlayers] = useState<Player[]>([]);
   const [roster, setRoster] = useState<TournamentRosterEntry[]>([]);
   const [games, setGames] = useState<Game[]>([]);
-  const [selectingAll, setSelectingAll] = useState(false);
+
+  // Check-in taps are buffered here (and mirrored to localStorage) instead of
+  // firing a request per click; a timer below flushes them in one batch.
+  const pendingRef = useRef<Record<string, PendingRosterChange>>({});
 
   useEffect(() => {
     findTournament(tournamentId).then((t) => {
@@ -31,9 +39,43 @@ export function TournamentDetail({ tournamentId }: { tournamentId: string }) {
       if (!t) return;
       readTeam(t.teamId).then((team) => setTeamName(team?.name ?? "Team"));
       readPlayers(t.teamId).then(setPlayers);
-      readTournamentRoster(tournamentId).then(setRoster);
+      readTournamentRoster(tournamentId).then((serverRoster) => {
+        const pending = readPendingRosterChanges(tournamentId);
+        pendingRef.current = pending;
+        setRoster(applyPendingRosterChanges(serverRoster, pending));
+      });
       listTournamentGames(tournamentId).then(setGames);
     });
+  }, [tournamentId]);
+
+  // Flush buffered taps periodically; skip entirely if nothing changed. On a
+  // successful flush, just adopt whatever the server returns as the new
+  // ground truth rather than trying to reconcile conflicts locally.
+  useEffect(() => {
+    const flush = async () => {
+      const pending = pendingRef.current;
+      const playerIds = Object.keys(pending);
+      if (playerIds.length === 0) return;
+      const changes = playerIds.map((playerId) => ({
+        playerId,
+        ...pending[playerId]!,
+      }));
+      try {
+        const serverRoster = await syncTournamentRoster(tournamentId, changes);
+        pendingRef.current = {};
+        writePendingRosterChanges(tournamentId, {});
+        setRoster(serverRoster);
+      } catch (err) {
+        // Offline or a transient error — leave the buffer intact and retry
+        // on the next tick.
+        console.error("[check-in] sync failed, will retry", err);
+      }
+    };
+    const interval = setInterval(flush, FLUSH_INTERVAL_MS);
+    return () => {
+      clearInterval(interval);
+      flush();
+    };
   }, [tournamentId]);
 
   if (tournament === undefined) return <p className="text-muted">Loading…</p>;
@@ -61,20 +103,39 @@ export function TournamentDetail({ tournamentId }: { tournamentId: string }) {
     ? mmpCount >= 4 && wmpCount >= 4
     : presentPlayers.length >= 7;
 
-  const refreshRoster = () => readTournamentRoster(tournamentId).then(setRoster);
+  const buffer = (playerId: string, change: PendingRosterChange) => {
+    pendingRef.current = { ...pendingRef.current, [playerId]: change };
+    writePendingRosterChanges(tournamentId, pendingRef.current);
+  };
 
-  const selectAll = async () => {
+  const setLocalPresent = (playerId: string, present: boolean) => {
+    const injured = roster.find((r) => r.playerId === playerId)?.injured ?? false;
+    buffer(playerId, { present, injured });
+    setRoster((r) => {
+      if (present) {
+        if (r.some((e) => e.playerId === playerId)) return r;
+        return [...r, { playerId, injured: false }];
+      }
+      return r.filter((e) => e.playerId !== playerId);
+    });
+  };
+
+  const setLocalInjured = (playerId: string, injured: boolean) => {
+    if (!presentIds.has(playerId)) return;
+    buffer(playerId, { present: true, injured });
+    setRoster((r) =>
+      r.map((e) => (e.playerId === playerId ? { ...e, injured } : e)),
+    );
+  };
+
+  const selectAll = () => {
     const absent = players.filter((p) => !presentIds.has(p.id));
     if (absent.length === 0) return;
-    setSelectingAll(true);
-    try {
-      await Promise.all(
-        absent.map((p) => setPlayerPresent(tournamentId, p.id, true)),
-      );
-      await refreshRoster();
-    } finally {
-      setSelectingAll(false);
-    }
+    for (const p of absent) buffer(p.id, { present: true, injured: false });
+    setRoster((r) => [
+      ...r,
+      ...absent.map((p) => ({ playerId: p.id, injured: false })),
+    ]);
   };
 
   return (
@@ -105,10 +166,9 @@ export function TournamentDetail({ tournamentId }: { tournamentId: string }) {
           {players.length > 0 && presentIds.size < players.length && (
             <button
               onClick={selectAll}
-              disabled={selectingAll}
-              className="text-sm font-medium text-emerald-700 hover:opacity-80 disabled:opacity-50 dark:text-emerald-400"
+              className="text-sm font-medium text-emerald-700 hover:opacity-80 dark:text-emerald-400"
             >
-              {selectingAll ? "Selecting…" : "Select all"}
+              Select all
             </button>
           )}
         </div>
@@ -130,14 +190,7 @@ export function TournamentDetail({ tournamentId }: { tournamentId: string }) {
                     <input
                       type="checkbox"
                       checked={present}
-                      onChange={(e) => {
-                        // The server cascades this onto every game under the
-                        // tournament (new players become eligible; removed
-                        // players are locked out — past line history untouched).
-                        setPlayerPresent(tournamentId, p.id, e.target.checked).then(
-                          refreshRoster,
-                        );
-                      }}
+                      onChange={(e) => setLocalPresent(p.id, e.target.checked)}
                     />
                     <span
                       className={
@@ -152,11 +205,7 @@ export function TournamentDetail({ tournamentId }: { tournamentId: string }) {
                   </label>
                   {present && (
                     <button
-                      onClick={() => {
-                        setPlayerInjured(tournamentId, p.id, !injured).then(
-                          refreshRoster,
-                        );
-                      }}
+                      onClick={() => setLocalInjured(p.id, !injured)}
                       className={`rounded px-2 py-0.5 text-xs ${
                         injured
                           ? "bg-amber-100 dark:bg-amber-500/20 text-amber-800 dark:text-amber-200"

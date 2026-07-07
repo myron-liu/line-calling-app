@@ -207,44 +207,48 @@ export async function listTournamentRoster(
   return rows.map((r) => ({ playerId: r.playerId, injured: r.injured }));
 }
 
-export async function setTournamentPresence(
-  tournamentId: string,
-  playerId: string,
-  present: boolean,
-): Promise<void> {
-  if (present) {
-    await db
-      .insert(tournamentRoster)
-      .values({ id: `${tournamentId}:${playerId}`, tournamentId, playerId })
-      .onConflictDoNothing({
-        target: [tournamentRoster.tournamentId, tournamentRoster.playerId],
-      });
-  } else {
-    await db
-      .delete(tournamentRoster)
-      .where(
-        and(
-          eq(tournamentRoster.tournamentId, tournamentId),
-          eq(tournamentRoster.playerId, playerId),
-        ),
-      );
-  }
+export interface TournamentRosterChange {
+  playerId: string;
+  present: boolean;
+  injured: boolean;
 }
 
-export async function setTournamentInjured(
+/**
+ * Applies a batch of check-in changes in one call — the client buffers taps
+ * locally (localStorage) and flushes periodically instead of one request per
+ * checkbox, so this always carries each changed player's full desired state
+ * (both fields) rather than a partial patch, which sidesteps any ambiguity
+ * about what to do with a field the caller didn't mention.
+ */
+export async function batchUpdateTournamentRoster(
   tournamentId: string,
-  playerId: string,
-  injured: boolean,
+  changes: TournamentRosterChange[],
 ): Promise<void> {
-  await db
-    .update(tournamentRoster)
-    .set({ injured })
-    .where(
-      and(
-        eq(tournamentRoster.tournamentId, tournamentId),
-        eq(tournamentRoster.playerId, playerId),
-      ),
-    );
+  for (const c of changes) {
+    if (c.present) {
+      await db
+        .insert(tournamentRoster)
+        .values({
+          id: `${tournamentId}:${c.playerId}`,
+          tournamentId,
+          playerId: c.playerId,
+          injured: c.injured,
+        })
+        .onConflictDoUpdate({
+          target: [tournamentRoster.tournamentId, tournamentRoster.playerId],
+          set: { injured: c.injured },
+        });
+    } else {
+      await db
+        .delete(tournamentRoster)
+        .where(
+          and(
+            eq(tournamentRoster.tournamentId, tournamentId),
+            eq(tournamentRoster.playerId, c.playerId),
+          ),
+        );
+    }
+  }
 }
 
 /**

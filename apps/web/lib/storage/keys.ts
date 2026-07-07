@@ -15,9 +15,11 @@ export const keys = {
   players: (teamId: string) => `${prefix}:team:${teamId}:players`,
   /** Tournaments belonging to a team (§4.2). */
   tournaments: (teamId: string) => `${prefix}:team:${teamId}:tournaments`,
-  /** Tournament check-in: which players are present + injured (§4.2). */
-  tournamentRoster: (tournamentId: string) =>
-    `${prefix}:tournament:${tournamentId}:roster`,
+  /** Check-in taps not yet flushed to the server (playerId -> desired
+   *  present/injured state), so they survive a reload and don't need one
+   *  request per tap — see lib/storage/tournaments.ts. */
+  tournamentRosterPending: (tournamentId: string) =>
+    `${prefix}:tournament:${tournamentId}:roster-pending`,
   /** Ids of games with a local log present — powers the game switcher. */
   gameIndex: `${prefix}:games`,
   /** The Game config (cap, ratio, starting O/D, timeouts) needed to derive state. */
