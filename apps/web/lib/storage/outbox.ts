@@ -82,6 +82,10 @@ export function pendingCount(): number {
   return readOutbox().length;
 }
 
+export function pendingCountFor(gameId: string): number {
+  return readOutbox().filter((e) => e.gameId === gameId).length;
+}
+
 export type FlushResult =
   | { status: "synced" }
   | { status: "conflict"; full: GameFull }

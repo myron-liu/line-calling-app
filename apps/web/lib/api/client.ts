@@ -6,6 +6,12 @@
 const BASE_URL =
   process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") ?? "http://localhost:4000";
 
+/** Full URL for a server path — e.g. for an EventSource, which needs a URL
+ *  rather than going through the request()/api.* helpers below. */
+export function apiUrl(path: string): string {
+  return `${BASE_URL}${path}`;
+}
+
 export class ApiError extends Error {
   constructor(
     public status: number,

@@ -6,8 +6,9 @@
 
 import { z } from "zod";
 import { newId } from "./id";
-import { HttpError, json, notFound, parseBody } from "./http";
+import { corsHeaders, HttpError, json, notFound, parseBody } from "./http";
 import * as q from "./db/queries";
+import { broadcast, subscribe, unsubscribe } from "./sse";
 
 export type Handler = (
   req: Request,
@@ -276,11 +277,56 @@ export const routes: Route[] = [
     );
     const result = await q.syncGame(id!, body);
     if (!result.ok) {
+      if (result.reason === "not_found") return notFound();
       // 409: the body still carries the server's current full state so the
       // client can reconcile without a second round trip (see resyncNow).
-      return result.reason === "not_found" ? notFound() : json(result.full, 409);
+      // Also push it over SSE so any other connected client (including a
+      // viewer who hasn't tried to write) learns about the conflict right
+      // away instead of only on its own next failed sync.
+      broadcast(id!, {
+        type: "conflict",
+        version: result.full.game.version,
+        rejectedVersion: body.version,
+      });
+      return json(result.full, 409);
     }
+    broadcast(id!, { type: "updated", version: result.full.game.version });
     return json(result.full);
+  }),
+  // SSE stream of conflict/update notifications for one game (see sse.ts) —
+  // lets a connected client find out its local state is stale in real time,
+  // rather than only discovering it via a rejected write.
+  route("GET", "/games/:id/events", async (_req, { id }) => {
+    const gameId = id!;
+    const encoder = new TextEncoder();
+    let heartbeat: ReturnType<typeof setInterval>;
+    let controllerRef: ReadableStreamDefaultController;
+    const stream = new ReadableStream({
+      start(controller) {
+        controllerRef = controller;
+        subscribe(gameId, controller);
+        controller.enqueue(encoder.encode(": connected\n\n"));
+        // Keep the connection alive through idle proxies/load balancers.
+        heartbeat = setInterval(() => {
+          try {
+            controller.enqueue(encoder.encode(": ping\n\n"));
+          } catch {
+            clearInterval(heartbeat);
+          }
+        }, 25_000);
+      },
+      cancel() {
+        clearInterval(heartbeat);
+        unsubscribe(gameId, controllerRef);
+      },
+    });
+    return new Response(stream, {
+      headers: {
+        ...corsHeaders,
+        "content-type": "text/event-stream",
+        "cache-control": "no-cache",
+      },
+    });
   }),
   route("DELETE", "/games/:id", async (_req, { id }) => {
     await q.deleteGame(id!);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   callHalftime,
   callTimeout,
@@ -19,7 +19,7 @@ import {
   type PointResult,
   type SavedLine,
 } from "@shared/game-rules";
-import { api } from "@/lib/api/client";
+import { api, apiUrl } from "@/lib/api/client";
 import { newId } from "@/lib/id";
 import {
   readGameConfig,
@@ -38,7 +38,13 @@ import {
   type GameFull,
   type RosterSnapshotEntry,
 } from "@/lib/storage/gameLog";
-import { dropPending, enqueue, flush, type OutboxEventType } from "@/lib/storage/outbox";
+import {
+  dropPending,
+  enqueue,
+  flush,
+  pendingCountFor,
+  type OutboxEventType,
+} from "@/lib/storage/outbox";
 import {
   createSavedLine,
   deleteSavedLine,
@@ -177,6 +183,47 @@ export function useLiveGame(gameId: string): LiveGameResult {
     };
   }, [gameId, adoptServerState]);
 
+  // Kept in sync so the SSE handler below (a plain callback, not a state
+  // updater) can read the latest game version without re-subscribing on
+  // every commit.
+  const gameRef = useRef<Game | null>(null);
+  useEffect(() => {
+    gameRef.current = game;
+  }, [game]);
+
+  // Real-time conflict notifications (see apps/server/src/sse.ts): while this
+  // game is open, learn about another device's write immediately instead of
+  // only on our own next (rejected) sync attempt. Whether the pushed version
+  // came from a clean write or one that bounced someone else's stale attempt
+  // doesn't change what *we* should do with it: if we have nothing pending,
+  // a newer version is harmless to adopt quietly; if we do, our own base is
+  // now stale, so surface a conflict instead (commit() below refuses to
+  // write further until the coach resolves it via resyncNow) rather than
+  // silently discarding or clobbering either side.
+  useEffect(() => {
+    const source = new EventSource(apiUrl(`/games/${gameId}/events`));
+    source.onmessage = (ev) => {
+      if (!ev.data) return;
+      let data: { type: "updated" | "conflict"; version: number };
+      try {
+        data = JSON.parse(ev.data);
+      } catch {
+        return;
+      }
+      const current = gameRef.current;
+      if (!current || data.version <= current.version) return;
+      if (pendingCountFor(gameId) > 0) {
+        setSyncState((s) => ({ ...s, status: "conflict" }));
+        return;
+      }
+      api
+        .get<GameFull>(`/games/${gameId}/full`)
+        .then((full) => adoptServerState(full, false))
+        .catch(() => {});
+    };
+    return () => source.close();
+  }, [gameId, adoptServerState]);
+
   // Best-effort background sync, once on load: pick up roster changes made
   // server-side (e.g. a tournament check-in edit) since this game was created,
   // and flush any outbox backlog left over from a previous offline session.
@@ -230,9 +277,19 @@ export function useLiveGame(gameId: string): LiveGameResult {
     [game, log],
   );
 
-  /** Persist a new log state, mirror to the outbox, and best-effort sync. */
+  /** Persist a new log state, mirror to the outbox, and best-effort sync.
+   *  Refuses to write at all while a conflict is outstanding (surfaced by
+   *  either a rejected flush or the real-time SSE notification above) — the
+   *  coach must resolve it via resyncNow first, rather than the local log
+   *  drifting further from a base the server already moved past. */
   const commit = useCallback(
     (next: GameLogState, type: OutboxEventType, payload: unknown) => {
+      if (syncState.status === "conflict") {
+        setError(
+          "This game was updated on another device — tap “Sync now” above before making further changes.",
+        );
+        return;
+      }
       writeLog(gameId, next.points);
       writeMeta(gameId, next.meta);
       enqueue(gameId, type, payload);
@@ -257,7 +314,7 @@ export function useLiveGame(gameId: string): LiveGameResult {
         }
       });
     },
-    [gameId, game],
+    [gameId, game, syncState.status],
   );
 
   /** Wrap a reducer call so thrown validation errors surface, not crash. */
