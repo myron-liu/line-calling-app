@@ -27,6 +27,7 @@ import {
   readLog,
   readMeta,
   readRosterSnapshot,
+  registerGame,
   setRosterInjured,
   unregisterGame,
   writeGameConfig,
@@ -115,23 +116,6 @@ export function useLiveGame(gameId: string): LiveGameResult {
     endedManually: false,
   });
 
-  // Load from storage on mount.
-  useEffect(() => {
-    const g = readGameConfig(gameId);
-    if (!g) {
-      setNotFound(true);
-      return;
-    }
-    setGame(g);
-    setRoster(readRosterSnapshot(gameId));
-    readSavedLines(savedLinesScope(g)).then(setSavedLines);
-    setLog({
-      points: readLog(gameId),
-      meta: readMeta(gameId) ?? defaultMeta(g),
-    });
-    setSyncState({ status: "idle", lastSyncedAt: readLastSyncedAt(gameId) });
-  }, [gameId]);
-
   /** Overwrite the local cache with the server's authoritative state — used to
    *  resolve a sync conflict, or to catch up when another device has moved the
    *  game ahead of us. Drops any pending outbox events for this game, since
@@ -157,6 +141,41 @@ export function useLiveGame(gameId: string): LiveGameResult {
     },
     [gameId],
   );
+
+  // Load from storage on mount, falling back to the server if this device has
+  // no local cache for this game yet — e.g. the game was created on a
+  // different device/browser, or local storage was cleared. The live game
+  // still never *requires* the network once loaded; this is just a one-time
+  // adoption path for a cold local cache.
+  useEffect(() => {
+    let cancelled = false;
+    const g = readGameConfig(gameId);
+    if (g) {
+      setGame(g);
+      setRoster(readRosterSnapshot(gameId));
+      readSavedLines(savedLinesScope(g)).then(setSavedLines);
+      setLog({
+        points: readLog(gameId),
+        meta: readMeta(gameId) ?? defaultMeta(g),
+      });
+      setSyncState({ status: "idle", lastSyncedAt: readLastSyncedAt(gameId) });
+      return;
+    }
+    api
+      .get<GameFull>(`/games/${gameId}/full`)
+      .then((full) => {
+        if (cancelled) return;
+        adoptServerState(full, false);
+        registerGame(gameId);
+        readSavedLines(savedLinesScope(full.game)).then(setSavedLines);
+      })
+      .catch(() => {
+        if (!cancelled) setNotFound(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [gameId, adoptServerState]);
 
   // Best-effort background sync, once on load: pick up roster changes made
   // server-side (e.g. a tournament check-in edit) since this game was created,
