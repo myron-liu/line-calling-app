@@ -15,6 +15,7 @@ import {
   type TournamentRosterEntry,
 } from "@/lib/storage/tournaments";
 import { listTournamentGames } from "@/lib/storage/games";
+import { sortRoster } from "@/lib/player-display";
 import { CreateGameForm } from "./create-game-form";
 import { GameList } from "./team-detail";
 
@@ -178,7 +179,7 @@ export function TournamentDetail({ tournamentId }: { tournamentId: string }) {
           </p>
         ) : (
           <ul className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
-            {players.map((p) => {
+            {sortRoster(players).map((p) => {
               const present = presentIds.has(p.id);
               const injured = injuredIds.has(p.id);
               return (

@@ -11,7 +11,7 @@ import {
   readSavedLines,
   updateSavedLine,
 } from "@/lib/storage/savedLines";
-import { displayName, odTag, roleTag, sortByRole } from "@/lib/player-display";
+import { displayName, odTag, roleTag, sortRoster } from "@/lib/player-display";
 
 // Build/edit reusable lines (7) and pods (1-6) for a team, reached from the
 // tournament page. Saved lines are team-scoped (§4.3) so they show up in the
@@ -151,13 +151,13 @@ export function LinesEditor({ tournamentId }: { tournamentId: string }) {
           <div className="grid grid-cols-2 gap-3">
             <PlayerColumn
               gender="MMP"
-              players={sortByRole(players.filter((p) => p.genderMatch === "MMP"))}
+              players={sortRoster(players.filter((p) => p.genderMatch === "MMP"))}
               selected={selected}
               onToggle={toggle}
             />
             <PlayerColumn
               gender="WMP"
-              players={sortByRole(players.filter((p) => p.genderMatch === "WMP"))}
+              players={sortRoster(players.filter((p) => p.genderMatch === "WMP"))}
               selected={selected}
               onToggle={toggle}
             />

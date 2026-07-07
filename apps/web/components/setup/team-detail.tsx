@@ -26,7 +26,7 @@ import {
   readTournaments,
 } from "@/lib/storage/tournaments";
 import { Modal } from "@/components/modal";
-import { displayName, odTag, roleTag } from "@/lib/player-display";
+import { displayName, odTag, roleTag, sortRoster } from "@/lib/player-display";
 
 export function TeamDetail({ teamId }: { teamId: string }) {
   const [team, setTeam] = useState<Team | null>(null);
@@ -129,7 +129,7 @@ function Roster({
         <p className="text-sm text-muted">No players yet.</p>
       ) : (
         <ul className="grid grid-cols-2 gap-1.5">
-          {players.map((p) => (
+          {sortRoster(players).map((p) => (
             <li
               key={p.id}
               className={`flex items-center gap-1 rounded-md border px-2 py-1.5 text-[13px] ${
@@ -174,18 +174,18 @@ function Roster({
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="Player name"
-          className="min-w-[8rem] flex-1 rounded border border-line-strong px-2 py-1.5"
+          className="h-9 min-w-[8rem] flex-1 rounded border border-line-strong px-2"
         />
         <input
           value={nickname}
           onChange={(e) => setNickname(e.target.value)}
           placeholder="Nickname"
-          className="min-w-[7rem] flex-1 rounded border border-line-strong px-2 py-1.5"
+          className="h-9 min-w-[7rem] flex-1 rounded border border-line-strong px-2"
         />
         <select
           value={genderMatch}
           onChange={(e) => setGenderMatch(e.target.value as GenderMatch)}
-          className="rounded border border-line-strong px-2 py-1.5"
+          className="h-9 rounded border border-line-strong px-2"
         >
           <option value="MMP">MMP</option>
           <option value="WMP">WMP</option>
@@ -193,7 +193,7 @@ function Roster({
         <select
           value={role}
           onChange={(e) => setRole(e.target.value as Role)}
-          className="rounded border border-line-strong px-2 py-1.5"
+          className="h-9 rounded border border-line-strong px-2"
         >
           <option value="handler">Handler</option>
           <option value="cutter">Cutter</option>
@@ -202,7 +202,7 @@ function Roster({
         <select
           value={odPreference}
           onChange={(e) => setOdPreference(e.target.value as ODPreference)}
-          className="rounded border border-line-strong px-2 py-1.5"
+          className="h-9 rounded border border-line-strong px-2"
         >
           <option value="O">O</option>
           <option value="D">D</option>
@@ -213,12 +213,12 @@ function Roster({
           onChange={(e) => setJersey(e.target.value.replace(/\D/g, ""))}
           placeholder="#"
           inputMode="numeric"
-          className="w-14 rounded border border-line-strong px-2 py-1.5"
+          className="h-9 w-14 rounded border border-line-strong px-2"
         />
         <button
           onClick={add}
           disabled={!name.trim() || !!conflict}
-          className="rounded bg-emerald-600 px-3 py-1.5 font-medium text-white disabled:bg-disabled"
+          className="h-9 rounded bg-emerald-600 px-3 font-medium text-white disabled:bg-disabled"
         >
           Add
         </button>
@@ -297,7 +297,7 @@ function EditPlayerModal({
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="rounded border border-line-strong px-2 py-1.5"
+            className="h-9 rounded border border-line-strong px-2"
           />
         </label>
         <label className="flex flex-col gap-1">
@@ -305,7 +305,7 @@ function EditPlayerModal({
           <input
             value={nickname}
             onChange={(e) => setNickname(e.target.value)}
-            className="rounded border border-line-strong px-2 py-1.5"
+            className="h-9 rounded border border-line-strong px-2"
           />
         </label>
         <label className="flex flex-col gap-1">
@@ -313,7 +313,7 @@ function EditPlayerModal({
           <select
             value={genderMatch}
             onChange={(e) => setGenderMatch(e.target.value as GenderMatch)}
-            className="rounded border border-line-strong px-2 py-1.5"
+            className="h-9 rounded border border-line-strong px-2"
           >
             <option value="MMP">MMP</option>
             <option value="WMP">WMP</option>
@@ -324,7 +324,7 @@ function EditPlayerModal({
           <select
             value={role}
             onChange={(e) => setRole(e.target.value as Role)}
-            className="rounded border border-line-strong px-2 py-1.5"
+            className="h-9 rounded border border-line-strong px-2"
           >
             <option value="handler">Handler</option>
             <option value="cutter">Cutter</option>
@@ -336,7 +336,7 @@ function EditPlayerModal({
           <select
             value={odPreference}
             onChange={(e) => setOdPreference(e.target.value as ODPreference)}
-            className="rounded border border-line-strong px-2 py-1.5"
+            className="h-9 rounded border border-line-strong px-2"
           >
             <option value="O">O</option>
             <option value="D">D</option>
@@ -410,13 +410,13 @@ function Tournaments({
           value={name}
           onChange={(e) => setName(e.target.value)}
           placeholder="Tournament name"
-          className="min-w-[8rem] flex-1 rounded border border-line-strong px-2 py-1.5"
+          className="h-9 min-w-[8rem] flex-1 rounded border border-line-strong px-2"
         />
         <input
           type="date"
           value={date}
           onChange={(e) => setDate(e.target.value)}
-          className="rounded border border-line-strong px-2 py-1.5"
+          className="h-9 rounded border border-line-strong px-2"
         />
         <button
           onClick={() => {
@@ -425,7 +425,7 @@ function Tournaments({
             setName("");
           }}
           disabled={!name.trim()}
-          className="rounded bg-emerald-600 px-3 py-1.5 font-medium text-white disabled:bg-disabled"
+          className="h-9 rounded bg-emerald-600 px-3 font-medium text-white disabled:bg-disabled"
         >
           Create
         </button>

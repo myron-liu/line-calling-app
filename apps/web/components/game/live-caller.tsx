@@ -11,7 +11,7 @@ import {
 } from "@shared/game-rules";
 import type { LiveGame } from "@/lib/game/useLiveGame";
 import { isRosterActive, type RosterSnapshotEntry } from "@/lib/storage/gameLog";
-import { displayName, roleTag, sortByRole } from "@/lib/player-display";
+import { displayName, roleTag, sortRoster } from "@/lib/player-display";
 
 // The live line caller (§8). Drives the engine hook; only reads/writes localStorage.
 export function LiveCaller({ live }: { live: LiveGame }) {
@@ -541,7 +541,7 @@ function GenderColumns({
     <div className="grid grid-cols-2 gap-3">
       <RosterColumn
         gender="MMP"
-        players={sortByRole(players.filter((p) => p.genderMatch === "MMP"))}
+        players={sortRoster(players.filter((p) => p.genderMatch === "MMP"))}
         selected={selected}
         slotLabels={slotLabels}
         pointsPlayed={pointsPlayed}
@@ -551,7 +551,7 @@ function GenderColumns({
       />
       <RosterColumn
         gender="WMP"
-        players={sortByRole(players.filter((p) => p.genderMatch === "WMP"))}
+        players={sortRoster(players.filter((p) => p.genderMatch === "WMP"))}
         selected={selected}
         slotLabels={slotLabels}
         pointsPlayed={pointsPlayed}
@@ -649,7 +649,8 @@ function InjuryManager({
   roster: RosterSnapshotEntry[];
   onToggle: (playerId: string, injured: boolean) => void;
 }) {
-  const injured = roster.filter((p) => p.injured);
+  const sorted = sortRoster(roster);
+  const injured = sorted.filter((p) => p.injured);
 
   return (
     <div className="space-y-2">
@@ -687,7 +688,7 @@ function InjuryManager({
           Manage injuries
         </summary>
         <ul className="mt-2 grid grid-cols-1 gap-1 sm:grid-cols-2">
-          {roster.map((p) => (
+          {sorted.map((p) => (
             <li
               key={p.playerId}
               className="flex items-center justify-between rounded-md border border-line px-2 py-1"
@@ -888,12 +889,14 @@ function InjuryFlow({ live }: { live: LiveGame }) {
   const injuredPlayer = injuredId ? byId.get(injuredId) : undefined;
   // Replacements: eligible players NOT already on the field, and matching the
   // injured player's gender match — a sub can't change the line's ratio.
-  const replacements = roster.filter(
-    (p) =>
-      !p.injured &&
-      isRosterActive(p) &&
-      !onField.has(p.playerId) &&
-      (!injuredPlayer || p.genderMatch === injuredPlayer.genderMatch),
+  const replacements = sortRoster(
+    roster.filter(
+      (p) =>
+        !p.injured &&
+        isRosterActive(p) &&
+        !onField.has(p.playerId) &&
+        (!injuredPlayer || p.genderMatch === injuredPlayer.genderMatch),
+    ),
   );
 
   if (!injuredId) {
