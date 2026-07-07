@@ -205,6 +205,7 @@ function LineBuilder({
     (seed ?? []).filter((id) => eligibleIds.has(id)),
   );
   const [applyNote, setApplyNote] = useState<string | null>(null);
+  const [sortMode, setSortMode] = useState<"roster" | "recency">("roster");
   // Prune anyone who becomes ineligible (e.g. marked injured mid-build) without
   // resetting the rest of the pick — this only fires within the same point, since
   // a new point remounts LineBuilder via its `key` and re-seeds from scratch.
@@ -383,6 +384,20 @@ function LineBuilder({
         started a point.
       </p>
 
+      <div className="flex items-center gap-2 text-xs">
+        <span className="text-faint">Sort:</span>
+        <SortToggleButton
+          label="Roster"
+          active={sortMode === "roster"}
+          onClick={() => setSortMode("roster")}
+        />
+        <SortToggleButton
+          label="Least recently played"
+          active={sortMode === "recency"}
+          onClick={() => setSortMode("recency")}
+        />
+      </div>
+
       <ODAccordion
         label="Offense"
         tone="O"
@@ -392,6 +407,7 @@ function LineBuilder({
         slotLabels={slotLabels}
         pointsPlayed={state.pointsPlayed}
         benchGap={benchGap}
+        sortMode={sortMode}
         mmpFull={mmpFull}
         wmpFull={wmpFull}
         onToggle={toggle}
@@ -405,6 +421,7 @@ function LineBuilder({
         slotLabels={slotLabels}
         pointsPlayed={state.pointsPlayed}
         benchGap={benchGap}
+        sortMode={sortMode}
         mmpFull={mmpFull}
         wmpFull={wmpFull}
         onToggle={toggle}
@@ -471,6 +488,30 @@ function BenchGapBadge({
   );
 }
 
+function SortToggleButton({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      aria-pressed={active}
+      className={`rounded-full border px-2 py-0.5 ${
+        active
+          ? "border-emerald-500 bg-emerald-50 font-medium text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300"
+          : "border-line-strong text-faint"
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
 function ODAccordion({
   label,
   tone,
@@ -480,6 +521,7 @@ function ODAccordion({
   slotLabels,
   pointsPlayed,
   benchGap,
+  sortMode,
   mmpFull,
   wmpFull,
   onToggle,
@@ -492,6 +534,7 @@ function ODAccordion({
   slotLabels: Record<string, string>;
   pointsPlayed: Record<string, number>;
   benchGap: Record<string, number>;
+  sortMode: "roster" | "recency";
   mmpFull: boolean;
   wmpFull: boolean;
   onToggle: (id: string) => void;
@@ -509,6 +552,7 @@ function ODAccordion({
           slotLabels={slotLabels}
           pointsPlayed={pointsPlayed}
           benchGap={benchGap}
+          sortMode={sortMode}
           mmpFull={mmpFull}
           wmpFull={wmpFull}
           onToggle={onToggle}
@@ -518,12 +562,25 @@ function ODAccordion({
   );
 }
 
+/** Highest bench gap (longest since last started) first; ties broken by name. */
+function sortByRecency<T extends RosterSnapshotEntry>(
+  players: T[],
+  benchGap: Record<string, number>,
+): T[] {
+  return [...players].sort((a, b) => {
+    const gap = (benchGap[b.playerId] ?? 0) - (benchGap[a.playerId] ?? 0);
+    if (gap !== 0) return gap;
+    return displayName(a).localeCompare(displayName(b));
+  });
+}
+
 function GenderColumns({
   players,
   selected,
   slotLabels,
   pointsPlayed,
   benchGap,
+  sortMode,
   mmpFull,
   wmpFull,
   onToggle,
@@ -533,15 +590,19 @@ function GenderColumns({
   slotLabels: Record<string, string>;
   pointsPlayed: Record<string, number>;
   benchGap: Record<string, number>;
+  sortMode: "roster" | "recency";
   mmpFull: boolean;
   wmpFull: boolean;
   onToggle: (id: string) => void;
 }) {
+  const sort = sortMode === "recency"
+    ? (list: RosterSnapshotEntry[]) => sortByRecency(list, benchGap)
+    : sortRoster;
   return (
     <div className="grid grid-cols-2 gap-3">
       <RosterColumn
         gender="MMP"
-        players={sortRoster(players.filter((p) => p.genderMatch === "MMP"))}
+        players={sort(players.filter((p) => p.genderMatch === "MMP"))}
         selected={selected}
         slotLabels={slotLabels}
         pointsPlayed={pointsPlayed}
@@ -551,7 +612,7 @@ function GenderColumns({
       />
       <RosterColumn
         gender="WMP"
-        players={sortRoster(players.filter((p) => p.genderMatch === "WMP"))}
+        players={sort(players.filter((p) => p.genderMatch === "WMP"))}
         selected={selected}
         slotLabels={slotLabels}
         pointsPlayed={pointsPlayed}
@@ -951,7 +1012,7 @@ function InjuryFlow({ live }: { live: LiveGame }) {
 // ── Secondary controls (always available) ────────────────────────────────────────
 
 function SecondaryControls({ live }: { live: LiveGame }) {
-  const { state, actions } = live;
+  const { state, actions, canUndo, canRedo } = live;
   return (
     <div className="flex flex-wrap gap-2 border-t border-line pt-3 text-sm">
       <SmallButton
@@ -969,7 +1030,8 @@ function SecondaryControls({ live }: { live: LiveGame }) {
         disabled={state.theirTimeoutsRemaining <= 0}
         onClick={() => actions.callTimeout("them")}
       />
-      <SmallButton label="Undo" onClick={actions.undo} />
+      {canUndo && <SmallButton label="Undo" onClick={actions.undo} />}
+      {canRedo && <SmallButton label="Redo" onClick={actions.redo} />}
       <SmallButton label="End game" onClick={actions.endGame} />
     </div>
   );

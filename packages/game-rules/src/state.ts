@@ -314,16 +314,37 @@ export function editPointLineup(
   };
 }
 
+/** How to reverse a one-step undo — replaying the exact reducer call it
+ *  reverted, so redo() can just re-dispatch it instead of duplicating logic. */
+export type RedoAction =
+  | { type: "confirmLine"; lineup: string[]; pointId: string }
+  | { type: "recordResult"; scorer: PointResult }
+  | { type: "endGame" };
+
 export interface UndoResult extends GameLogState {
   /** The reverted point's line, so the UI can pre-select it for a re-call.
-   *  Null when undoing a manual end (no line to restore). */
+   *  Set only when undo un-confirms a line (back to awaiting_line); null
+   *  otherwise, since the other cases don't return to line-building. */
   restoredLineup: string[] | null;
+  /** Replay this via redo() to reapply exactly what was just undone. */
+  redo: RedoAction;
 }
 
 /**
- * One-step undo (§7). Reverts either the manual end or the most recently completed
- * point, re-deriving score/O-D/ratio/halftime from the log. Strictly one level
- * deep; older corrections go through editPointLineup.
+ * One-step undo (§7), phase-aware: reverts whichever single transition most
+ * recently moved the game forward, so the coach lands back on the previous
+ * screen rather than always losing a whole point.
+ *
+ *  - Manually ended → un-end (back to whatever phase the score implies).
+ *  - A line is confirmed but undecided (point_in_progress) → un-confirm it,
+ *    back to awaiting_line for the same point, with its lineup restored so
+ *    the coach can re-pick or just re-confirm it.
+ *  - Otherwise the last point is already decided (awaiting_line for the
+ *    next point) → un-record *just* its result, back to point_in_progress
+ *    for it. The point and its lineup are untouched — undoing the lineup
+ *    itself is a second, separate undo away.
+ *
+ * Strictly one level deep; older corrections go through editPointLineup.
  */
 export function undoLastPoint(
   game: GameRules,
@@ -334,15 +355,24 @@ export function undoLastPoint(
       points: state.points,
       meta: { ...state.meta, endedManually: false },
       restoredLineup: null,
+      redo: { type: "endGame" },
     };
   }
   if (state.points.length === 0) throw new Error("Nothing to undo");
   const last = state.points[state.points.length - 1]!;
+
   if (last.result === undefined) {
-    throw new Error("Finish or edit the point in progress before undoing");
+    return {
+      points: state.points.slice(0, -1),
+      meta: state.meta,
+      restoredLineup: last.lineup,
+      redo: { type: "confirmLine", lineup: last.lineup, pointId: last.id },
+    };
   }
 
-  const points = state.points.slice(0, -1);
+  const points = state.points.map((p, i) =>
+    i === state.points.length - 1 ? { ...p, result: undefined } : p,
+  );
   const wasHalftime = state.meta.halftimeReached;
   const nowHalftime = deriveHalftimeReached(game, points);
   const meta: GameMeta = { ...state.meta, halftimeReached: nowHalftime };
@@ -351,5 +381,27 @@ export function undoLastPoint(
     meta.ourTimeoutsRemaining = game.timeoutsPerHalf;
     meta.theirTimeoutsRemaining = game.timeoutsPerHalf;
   }
-  return { points, meta, restoredLineup: last.lineup };
+  return {
+    points,
+    meta,
+    restoredLineup: null,
+    redo: { type: "recordResult", scorer: last.result },
+  };
+}
+
+/** Reapply a RedoAction captured from undoLastPoint's result, by re-dispatching
+ *  the exact reducer call it reverted — so redo can never drift from undo. */
+export function redoAction(
+  game: GameRules,
+  state: GameLogState,
+  action: RedoAction,
+): GameLogState {
+  switch (action.type) {
+    case "confirmLine":
+      return confirmLine(game, state, action.lineup, action.pointId);
+    case "recordResult":
+      return recordResult(game, state, action.scorer);
+    case "endGame":
+      return endGame(state);
+  }
 }

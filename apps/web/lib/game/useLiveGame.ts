@@ -10,6 +10,7 @@ import {
   endGame,
   injurySub,
   recordResult,
+  redoAction as replayRedo,
   undoLastPoint,
   type Game,
   type GameLogState,
@@ -17,6 +18,7 @@ import {
   type LiveGameState,
   type Point,
   type PointResult,
+  type RedoAction,
   type SavedLine,
 } from "@shared/game-rules";
 import { api, apiUrl } from "@/lib/api/client";
@@ -79,6 +81,10 @@ export interface LiveGame {
   savedLines: SavedLine[];
   /** Line pre-selected after an undo, so the coach can re-call it. */
   carryOver: string[] | null;
+  /** Whether there's anything for the undo/redo buttons to do — the UI
+   *  should hide rather than disable them when these are false. */
+  canUndo: boolean;
+  canRedo: boolean;
   sync: SyncState;
   actions: {
     confirmLine: (lineup: string[]) => void;
@@ -89,6 +95,9 @@ export interface LiveGame {
     editPointLineup: (pointId: string, lineup: string[]) => void;
     endGame: () => void;
     undo: () => void;
+    /** Reapplies exactly what the last undo reverted; available until any
+     *  other action invalidates it (see commit()). */
+    redo: () => void;
     saveLine: (name: string, playerIds: string[]) => void;
     deleteLine: (id: string) => void;
     recordLineUsage: (id: string) => void;
@@ -108,6 +117,7 @@ export function useLiveGame(gameId: string): LiveGameResult {
   const [log, setLog] = useState<GameLogState | null>(null);
   const [savedLines, setSavedLines] = useState<SavedLine[]>([]);
   const [carryOver, setCarryOver] = useState<string[] | null>(null);
+  const [pendingRedo, setPendingRedo] = useState<RedoAction | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [syncState, setSyncState] = useState<SyncState>({
@@ -290,6 +300,10 @@ export function useLiveGame(gameId: string): LiveGameResult {
         );
         return;
       }
+      // Any real log mutation invalidates a pending redo — it was only ever
+      // valid for replaying exactly the undo that produced it. undo() and
+      // redo() themselves set the redo state explicitly right after this.
+      setPendingRedo(null);
       writeLog(gameId, next.points);
       writeMeta(gameId, next.meta);
       enqueue(gameId, type, payload);
@@ -390,6 +404,13 @@ export function useLiveGame(gameId: string): LiveGameResult {
             {},
           );
           setCarryOver(result.restoredLineup);
+          setPendingRedo(result.redo);
+        }),
+      redo: () =>
+        run(() => {
+          if (!game || !log || !pendingRedo) return;
+          commit(replayRedo(game, log, pendingRedo), "redo", { pendingRedo });
+          setCarryOver(null);
         }),
       // Saved-line mutations are best-effort: they still work from inside the
       // live game (sideline connectivity is unreliable), so a failure is
@@ -470,7 +491,7 @@ export function useLiveGame(gameId: string): LiveGameResult {
           })();
         }),
     }),
-    [game, log, roster, commit, run, gameId, adoptServerState],
+    [game, log, roster, pendingRedo, commit, run, gameId, adoptServerState],
   );
 
   if (notFound) return { status: "not_found" };
@@ -485,6 +506,8 @@ export function useLiveGame(gameId: string): LiveGameResult {
       points: log.points,
       savedLines,
       carryOver,
+      canUndo: log.meta.endedManually || log.points.length > 0,
+      canRedo: pendingRedo !== null,
       sync: syncState,
       actions,
       error,

@@ -121,7 +121,7 @@ function BackLink({ game }: { game: Game }) {
 }
 
 function Recap({ live }: { live: LiveGame }) {
-  const { game, state, points, roster, actions } = live;
+  const { game, state, points, roster, actions, canUndo } = live;
   const byId = useMemo(
     () => new Map(roster.map((p) => [p.playerId, p])),
     [roster],
@@ -141,12 +141,14 @@ function Recap({ live }: { live: LiveGame }) {
         {game.gameCap}-cap
       </p>
 
-      <button
-        onClick={actions.undo}
-        className="rounded-md border border-line-strong px-3 py-1.5 text-sm"
-      >
-        Undo end
-      </button>
+      {canUndo && (
+        <button
+          onClick={actions.undo}
+          className="rounded-md border border-line-strong px-3 py-1.5 text-sm"
+        >
+          Undo end
+        </button>
+      )}
 
       <LineHistory points={points} byId={byId} />
 

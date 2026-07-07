@@ -10,6 +10,7 @@ import {
   endGame,
   editPointLineup,
   undoLastPoint,
+  redoAction,
 } from "./state";
 import type { Game, GameLogState, PointResult } from "./types";
 
@@ -186,15 +187,33 @@ describe("injury hot-sub", () => {
   });
 });
 
-describe("undo (one step)", () => {
-  test("reverts the last point, restores its line, re-derives score/O-D", () => {
-    let s = fresh();
-    s = playPoint(s, "us", ["a", "b", "c", "d", "e", "f", "g"]); // 1–0
-    s = playPoint(s, "them"); // 1–1
+describe("undo (one step, phase-aware)", () => {
+  test("point_in_progress → un-confirms the line, back to awaiting_line for the same point", () => {
+    const s = confirmLine(game, fresh(), line(1), "pt-1");
     const undone = undoLastPoint(game, s);
     const live = deriveLiveGameState(game, undone.points, undone.meta);
-    expect(live).toMatchObject({ ourScore: 1, theirScore: 0, currentPointNumber: 2 });
-    expect(undone.restoredLineup).not.toBeNull();
+    expect(live).toMatchObject({ phase: "awaiting_line", currentPointNumber: 1 });
+    expect(undone.points).toHaveLength(0);
+    expect(undone.restoredLineup).toEqual(line(1));
+    expect(undone.redo).toEqual({ type: "confirmLine", lineup: line(1), pointId: "pt-1" });
+  });
+
+  test("awaiting_line → un-records just the previous point's result, back to point_in_progress", () => {
+    let s = fresh();
+    s = playPoint(s, "us", ["a", "b", "c", "d", "e", "f", "g"]); // 1–0
+    s = playPoint(s, "them"); // 1–1, awaiting line 3
+    const undone = undoLastPoint(game, s);
+    const live = deriveLiveGameState(game, undone.points, undone.meta);
+    // The point-2 lineup/id are untouched — only its result was cleared.
+    expect(live).toMatchObject({
+      phase: "point_in_progress",
+      currentPointNumber: 2,
+      ourScore: 1,
+      theirScore: 0,
+    });
+    expect(undone.points).toHaveLength(2);
+    expect(undone.restoredLineup).toBeNull();
+    expect(undone.redo).toEqual({ type: "recordResult", scorer: "them" });
   });
 
   test("undo across the halftime boundary clears the flag and restores timeouts", () => {
@@ -208,9 +227,18 @@ describe("undo (one step)", () => {
     expect(live.ourScore).toBe(6);
   });
 
-  test("blocks undo of an in-progress (un-scored) point", () => {
-    const s = confirmLine(game, fresh(), line(1), "pt-1");
-    expect(() => undoLastPoint(game, s)).toThrow();
+  test("redoAction replays exactly what undo reverted", () => {
+    let s = fresh();
+    s = playPoint(s, "us"); // 1–0, awaiting line 2
+    const midLine = confirmLine(game, s, line(2), "pt-2");
+    const undoneConfirm = undoLastPoint(game, midLine);
+    const redoneConfirm = redoAction(game, undoneConfirm, undoneConfirm.redo);
+    expect(redoneConfirm).toEqual(midLine);
+
+    const decided = playPoint(s, "them"); // reuse `s`, decide point 2
+    const undoneResult = undoLastPoint(game, decided);
+    const redoneResult = redoAction(game, undoneResult, undoneResult.redo);
+    expect(redoneResult).toEqual(decided);
   });
 });
 

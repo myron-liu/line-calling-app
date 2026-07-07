@@ -20,7 +20,8 @@ export type OutboxEventType =
   | "halftime"
   | "timeout"
   | "endGame"
-  | "undo";
+  | "undo"
+  | "redo";
 
 export interface OutboxEvent {
   /** Idempotency key; the server upserts on this. */
