@@ -1,0 +1,47 @@
+# Local dev/test stack: a throwaway Postgres standing in for Supabase, plus the
+# API server and web app built from their production Dockerfiles. Production
+# itself points DATABASE_URL at a real Supabase project instead of `postgres`
+# below — see DEPLOYMENT.md.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_PASSWORD: devpass
+      POSTGRES_DB: lca_dev
+    ports:
+      - "55432:5432"
+    volumes:
+      - lca-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 10
+
+  server:
+    build:
+      context: .
+      dockerfile: apps/server/Dockerfile
+    ports:
+      - "4000:4000"
+    environment:
+      DATABASE_URL: postgres://postgres:devpass@postgres:5432/lca_dev
+      PORT: 4000
+      CORS_ORIGIN: "*"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:4000
+    ports:
+      - "3100:3100"
+    depends_on:
+      - server
+
+volumes:
+  lca-postgres-data:

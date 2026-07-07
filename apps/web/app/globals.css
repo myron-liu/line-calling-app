@@ -1,0 +1,66 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Semantic color tokens. Light by default; `.dark` on <html> flips them. */
+:root {
+  color-scheme: light;
+  --surface: #ffffff;
+  --surface-2: #f5f5f5; /* neutral-100 */
+  --fg: #171717; /* neutral-900 */
+  --muted: #737373; /* neutral-500 */
+  --faint: #a3a3a3; /* neutral-400 */
+  --line: #e5e5e5; /* neutral-200 */
+  --line-strong: #a3a3a3; /* neutral-400 */
+  --inverse: #171717; /* neutral-900 */
+  --inverse-fg: #ffffff;
+  --disabled: #d4d4d4; /* neutral-300 */
+  --page: #fafafa; /* neutral-50 */
+}
+
+.dark {
+  color-scheme: dark;
+  --surface: #171717; /* neutral-900 */
+  --surface-2: #262626; /* neutral-800 */
+  --fg: #f5f5f5; /* neutral-100 */
+  --muted: #a3a3a3; /* neutral-400 */
+  --faint: #6b6b6b;
+  --line: #2a2a2a;
+  --line-strong: #525252; /* neutral-600 */
+  --inverse: #f5f5f5; /* neutral-100 */
+  --inverse-fg: #171717;
+  --disabled: #404040; /* neutral-700 */
+  --page: #0a0a0a; /* neutral-950 */
+}
+
+html,
+body {
+  @apply antialiased;
+  background-color: var(--page);
+  color: var(--fg);
+}
+
+/* High-contrast, consistent form controls in both themes. */
+@layer base {
+  input,
+  select,
+  textarea {
+    @apply border-line-strong bg-surface text-fg;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    @apply text-faint;
+  }
+
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible {
+    @apply outline-none ring-2 ring-emerald-500/60;
+    border-color: var(--fg);
+  }
+
+  input[type="checkbox"] {
+    @apply h-4 w-4 accent-emerald-600;
+  }
+}
