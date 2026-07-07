@@ -113,6 +113,10 @@ export const routes: Route[] = [
     const team = await q.getTeam(id!);
     return team ? json(team) : notFound();
   }),
+  route("DELETE", "/teams/:id", async (_req, { id }) => {
+    await q.deleteTeam(id!);
+    return json({ ok: true });
+  }),
 
   // ── Players ────────────────────────────────────────────────────────────────
   route("GET", "/teams/:id/players", async (_req, { id }) =>

@@ -58,6 +58,10 @@ export async function createTeam(input: {
   return toTeam(row!);
 }
 
+export async function deleteTeam(id: string): Promise<void> {
+  await db.delete(teams).where(eq(teams.id, id));
+}
+
 function toTeam(row: typeof teams.$inferSelect): Team {
   return {
     id: row.id,

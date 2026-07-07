@@ -23,6 +23,7 @@ export function TournamentDetail({ tournamentId }: { tournamentId: string }) {
   const [players, setPlayers] = useState<Player[]>([]);
   const [roster, setRoster] = useState<TournamentRosterEntry[]>([]);
   const [games, setGames] = useState<Game[]>([]);
+  const [selectingAll, setSelectingAll] = useState(false);
 
   useEffect(() => {
     findTournament(tournamentId).then((t) => {
@@ -62,6 +63,20 @@ export function TournamentDetail({ tournamentId }: { tournamentId: string }) {
 
   const refreshRoster = () => readTournamentRoster(tournamentId).then(setRoster);
 
+  const selectAll = async () => {
+    const absent = players.filter((p) => !presentIds.has(p.id));
+    if (absent.length === 0) return;
+    setSelectingAll(true);
+    try {
+      await Promise.all(
+        absent.map((p) => setPlayerPresent(tournamentId, p.id, true)),
+      );
+      await refreshRoster();
+    } finally {
+      setSelectingAll(false);
+    }
+  };
+
   return (
     <section className="space-y-8">
       <div className="space-y-2">
@@ -80,12 +95,23 @@ export function TournamentDetail({ tournamentId }: { tournamentId: string }) {
       </div>
 
       <div className="space-y-3">
-        <h2 className="font-medium">
-          Check-in{" "}
-          <span className="text-faint">
-            ({presentIds.size}/{players.length} present)
-          </span>
-        </h2>
+        <div className="flex items-center justify-between">
+          <h2 className="font-medium">
+            Check-in{" "}
+            <span className="text-faint">
+              ({presentIds.size}/{players.length} present)
+            </span>
+          </h2>
+          {players.length > 0 && presentIds.size < players.length && (
+            <button
+              onClick={selectAll}
+              disabled={selectingAll}
+              className="text-sm font-medium text-emerald-700 hover:opacity-80 disabled:opacity-50 dark:text-emerald-400"
+            >
+              {selectingAll ? "Selecting…" : "Select all"}
+            </button>
+          )}
+        </div>
         {players.length === 0 ? (
           <p className="text-sm text-muted">
             No players on the team roster yet.
