@@ -1094,29 +1094,53 @@ function InjuryFlow({ live }: { live: LiveGame }) {
 // ── Secondary controls (always available) ────────────────────────────────────────
 
 function SecondaryControls({ live }: { live: LiveGame }) {
-  const { state, actions, canUndo, canRedo } = live;
+  const { state, actions, canUndo, canRedo, undoLabel, redoLabel, points } = live;
+  const [undoingFlip, setUndoingFlip] = useState(false);
+  const [flipError, setFlipError] = useState<string | null>(null);
+
+  const undoFlip = async () => {
+    setUndoingFlip(true);
+    setFlipError(null);
+    try {
+      await actions.undoFlip();
+    } catch (err) {
+      setFlipError(err instanceof Error ? err.message : String(err));
+      setUndoingFlip(false);
+    }
+  };
+
   return (
-    <div className="flex flex-wrap gap-2 border-t border-line pt-3 text-sm">
-      {state.currentPointNumber > 1 && (
+    <div className="space-y-2 border-t border-line pt-3">
+      <div className="flex flex-wrap gap-2 text-sm">
+        {state.currentPointNumber > 1 && state.phase !== "point_in_progress" && (
+          <SmallButton
+            label="Halftime"
+            disabled={state.halftimeReached}
+            onClick={actions.callHalftime}
+          />
+        )}
         <SmallButton
-          label="Halftime"
-          disabled={state.halftimeReached}
-          onClick={actions.callHalftime}
+          label={`Timeout us (${state.ourTimeoutsRemaining})`}
+          disabled={state.ourTimeoutsRemaining <= 0}
+          onClick={() => actions.callTimeout("us")}
         />
-      )}
-      <SmallButton
-        label={`Timeout us (${state.ourTimeoutsRemaining})`}
-        disabled={state.ourTimeoutsRemaining <= 0}
-        onClick={() => actions.callTimeout("us")}
-      />
-      <SmallButton
-        label={`Timeout them (${state.theirTimeoutsRemaining})`}
-        disabled={state.theirTimeoutsRemaining <= 0}
-        onClick={() => actions.callTimeout("them")}
-      />
-      {canUndo && <SmallButton label="Undo" onClick={actions.undo} />}
-      {canRedo && <SmallButton label="Redo" onClick={actions.redo} />}
-      <SmallButton label="End game" onClick={actions.endGame} />
+        <SmallButton
+          label={`Timeout them (${state.theirTimeoutsRemaining})`}
+          disabled={state.theirTimeoutsRemaining <= 0}
+          onClick={() => actions.callTimeout("them")}
+        />
+        {canUndo && <SmallButton label={undoLabel ?? "Undo"} onClick={actions.undo} />}
+        {canRedo && <SmallButton label={redoLabel ?? "Redo"} onClick={actions.redo} />}
+        {points.length === 0 && (
+          <SmallButton
+            label={undoingFlip ? "Undoing flip…" : "Undo flip"}
+            disabled={undoingFlip}
+            onClick={undoFlip}
+          />
+        )}
+        <SmallButton label="End game" onClick={actions.endGame} />
+      </div>
+      {flipError && <p className="text-xs text-red-600 dark:text-red-400">{flipError}</p>}
     </div>
   );
 }

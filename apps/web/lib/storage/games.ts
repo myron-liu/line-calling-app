@@ -90,9 +90,22 @@ export async function createGame(input: CreateGameInput): Promise<Game> {
  *  the live caller unlocks immediately. */
 export async function resolveFlip(
   gameId: string,
-  patch: { fieldSide: "left" | "right"; teamColor: "light" | "dark"; startingOD: OD },
+  patch: {
+    fieldSide: "left" | "right";
+    teamColor: "light" | "dark";
+    startingOD: OD;
+    startingGenderRatio?: GenderRatio;
+  },
 ): Promise<Game> {
   const game = await api.post<Game>(`/games/${gameId}/resolve-flip`, patch);
+  writeGameConfig(game);
+  return game;
+}
+
+/** Reverts a resolved flip back to "scheduled" (see queries.ts's undoFlip) —
+ *  only valid before the game's first point has been recorded. */
+export async function undoFlip(gameId: string): Promise<Game> {
+  const game = await api.post<Game>(`/games/${gameId}/undo-flip`, {});
   writeGameConfig(game);
   return game;
 }

@@ -296,7 +296,6 @@ function CheckInAccordion({
                   checked={present}
                   onChange={(e) => onTogglePresent(p.id, e.target.checked)}
                 />
-                <span className={t.text}>{p.genderMatch}</span>
                 <span className={present ? "" : "text-faint"}>
                   {p.nickname || p.name}
                 </span>

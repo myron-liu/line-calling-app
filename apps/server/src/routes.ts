@@ -8,7 +8,7 @@ import { z } from "zod";
 import { newId } from "./id";
 import { corsHeaders, HttpError, json, notFound, parseBody } from "./http";
 import * as q from "./db/queries";
-import { broadcast, subscribe, unsubscribe } from "./sse";
+import { broadcast, savedLinesChannel, subscribe, unsubscribe } from "./sse";
 
 export type Handler = (
   req: Request,
@@ -105,6 +105,42 @@ const route = (method: string, path: string, handler: Handler): Route => ({
   path,
   handler: wrap(handler),
 });
+
+/** A bare SSE stream over one sse.ts channel — used for both a game's own
+ *  conflict/update notifications and (separately) a team's saved-lines
+ *  updates. Just relays whatever broadcast() sends; callers never need to
+ *  inspect the stream itself, only subscribe/unsubscribe to the channel. */
+function sseStream(channel: string): Response {
+  const encoder = new TextEncoder();
+  let heartbeat: ReturnType<typeof setInterval>;
+  let controllerRef: ReadableStreamDefaultController;
+  const stream = new ReadableStream({
+    start(controller) {
+      controllerRef = controller;
+      subscribe(channel, controller);
+      controller.enqueue(encoder.encode(": connected\n\n"));
+      // Keep the connection alive through idle proxies/load balancers.
+      heartbeat = setInterval(() => {
+        try {
+          controller.enqueue(encoder.encode(": ping\n\n"));
+        } catch {
+          clearInterval(heartbeat);
+        }
+      }, 25_000);
+    },
+    cancel() {
+      clearInterval(heartbeat);
+      unsubscribe(channel, controllerRef);
+    },
+  });
+  return new Response(stream, {
+    headers: {
+      ...corsHeaders,
+      "content-type": "text/event-stream",
+      "cache-control": "no-cache",
+    },
+  });
+}
 
 export const routes: Route[] = [
   // ── Teams ──────────────────────────────────────────────────────────────────
@@ -237,10 +273,9 @@ export const routes: Route[] = [
         side: odPreference.nullable().optional(),
       }),
     );
-    return json(
-      await q.createSavedLine({ id: newId(), teamId: id!, ...body }),
-      201,
-    );
+    const line = await q.createSavedLine({ id: newId(), teamId: id!, ...body });
+    broadcast(savedLinesChannel(id!), { type: "updated" });
+    return json(line, 201);
   }),
   route("PATCH", "/saved-lines/:id", async (req, { id }) => {
     const body = await parseBody(
@@ -253,16 +288,28 @@ export const routes: Route[] = [
       }),
     );
     const line = await q.updateSavedLine(id!, body);
-    return line ? json(line) : notFound();
+    if (!line) return notFound();
+    broadcast(savedLinesChannel(line.teamId), { type: "updated" });
+    return json(line);
   }),
   route("POST", "/saved-lines/:id/use", async (_req, { id }) => {
     const line = await q.incrementSavedLineUsage(id!);
-    return line ? json(line) : notFound();
+    if (!line) return notFound();
+    broadcast(savedLinesChannel(line.teamId), { type: "updated" });
+    return json(line);
   }),
   route("DELETE", "/saved-lines/:id", async (_req, { id }) => {
-    await q.deleteSavedLine(id!);
+    const teamId = await q.deleteSavedLine(id!);
+    if (teamId) broadcast(savedLinesChannel(teamId), { type: "updated" });
     return json({ ok: true });
   }),
+  // SSE stream of saved-lines updates for one team (see sse.ts) — entirely
+  // separate from any game's own conflict/version notifications, so an
+  // in-progress live game never treats a pod being saved/edited elsewhere as
+  // its own state going stale.
+  route("GET", "/teams/:id/saved-lines/events", async (_req, { id }) =>
+    sseStream(savedLinesChannel(id!)),
+  ),
 
   // ── Games ──────────────────────────────────────────────────────────────────
   route("GET", "/teams/:id/games", async (_req, { id }) =>
@@ -295,9 +342,19 @@ export const routes: Route[] = [
   route("POST", "/games/:id/resolve-flip", async (req, { id }) => {
     const body = await parseBody(
       req,
-      z.object({ fieldSide, teamColor, startingOD: od }),
+      z.object({
+        fieldSide,
+        teamColor,
+        startingOD: od,
+        startingGenderRatio: genderRatio.optional(),
+      }),
     );
     const game = await q.resolveFlip(id!, body);
+    broadcast(id!, { type: "updated", version: game.version });
+    return json(game);
+  }),
+  route("POST", "/games/:id/undo-flip", async (_req, { id }) => {
+    const game = await q.undoFlip(id!);
     broadcast(id!, { type: "updated", version: game.version });
     return json(game);
   }),
@@ -352,38 +409,7 @@ export const routes: Route[] = [
   // SSE stream of conflict/update notifications for one game (see sse.ts) —
   // lets a connected client find out its local state is stale in real time,
   // rather than only discovering it via a rejected write.
-  route("GET", "/games/:id/events", async (_req, { id }) => {
-    const gameId = id!;
-    const encoder = new TextEncoder();
-    let heartbeat: ReturnType<typeof setInterval>;
-    let controllerRef: ReadableStreamDefaultController;
-    const stream = new ReadableStream({
-      start(controller) {
-        controllerRef = controller;
-        subscribe(gameId, controller);
-        controller.enqueue(encoder.encode(": connected\n\n"));
-        // Keep the connection alive through idle proxies/load balancers.
-        heartbeat = setInterval(() => {
-          try {
-            controller.enqueue(encoder.encode(": ping\n\n"));
-          } catch {
-            clearInterval(heartbeat);
-          }
-        }, 25_000);
-      },
-      cancel() {
-        clearInterval(heartbeat);
-        unsubscribe(gameId, controllerRef);
-      },
-    });
-    return new Response(stream, {
-      headers: {
-        ...corsHeaders,
-        "content-type": "text/event-stream",
-        "cache-control": "no-cache",
-      },
-    });
-  }),
+  route("GET", "/games/:id/events", async (_req, { id }) => sseStream(id!)),
   route("DELETE", "/games/:id", async (_req, { id }) => {
     await q.deleteGame(id!);
     return json({ ok: true });

@@ -47,21 +47,39 @@ export function GameScreen({ gameId }: { gameId: string }) {
 }
 
 // Gates entry into the live caller until the coach records what the coin flip
-// actually decided — field side, team color, and starting O/D are usually
-// only known at that point, not at creation time (§ create-game-form).
+// actually decided — field side, team color, starting O/D, and (for mixed
+// teams) which gender majority starts the first point are usually only known
+// at that point, not at creation time (§ create-game-form).
 function FlipResultForm({ live }: { live: LiveGame }) {
   const { game, actions } = live;
+  const [isMixed, setIsMixed] = useState(false);
   const [fieldSide, setFieldSide] = useState<"left" | "right">("left");
   const [teamColor, setTeamColor] = useState<"light" | "dark">("light");
   const [startingOD, setStartingOD] = useState<OD>("O");
+  const [manMajorityFirst, setManMajorityFirst] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    readTeam(game.teamId)
+      .then((team) => setIsMixed(team?.division === "mixed"))
+      .catch(() => {});
+  }, [game.teamId]);
 
   const submit = async () => {
     setSubmitting(true);
     setError(null);
     try {
-      await actions.resolveFlip({ fieldSide, teamColor, startingOD });
+      await actions.resolveFlip({
+        fieldSide,
+        teamColor,
+        startingOD,
+        startingGenderRatio: isMixed
+          ? manMajorityFirst
+            ? "4MMP_3WMP"
+            : "4WMP_3MMP"
+          : undefined,
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setSubmitting(false);
@@ -99,7 +117,7 @@ function FlipResultForm({ live }: { live: LiveGame }) {
             <option value="dark">Dark</option>
           </select>
         </label>
-        <label className="col-span-2 flex flex-col gap-1">
+        <label className={isMixed ? "flex flex-col gap-1" : "col-span-2 flex flex-col gap-1"}>
           <span className="text-muted">Starting on</span>
           <select
             value={startingOD}
@@ -110,6 +128,19 @@ function FlipResultForm({ live }: { live: LiveGame }) {
             <option value="D">Defense</option>
           </select>
         </label>
+        {isMixed && (
+          <label className="flex flex-col gap-1">
+            <span className="text-muted">First point majority</span>
+            <select
+              value={manMajorityFirst ? "MMP" : "WMP"}
+              onChange={(e) => setManMajorityFirst(e.target.value === "MMP")}
+              className="rounded border border-line-strong px-3 py-2"
+            >
+              <option value="MMP">4 MMP / 3 WMP</option>
+              <option value="WMP">4 WMP / 3 MMP</option>
+            </select>
+          </label>
+        )}
       </div>
       {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
       <button
@@ -197,7 +228,7 @@ function BackLink({ game }: { game: Game }) {
 }
 
 function Recap({ live }: { live: LiveGame }) {
-  const { game, state, points, roster, actions, canUndo } = live;
+  const { game, state, points, roster, actions, canUndo, undoLabel } = live;
   const byId = useMemo(
     () => new Map(roster.map((p) => [p.playerId, p])),
     [roster],
@@ -222,7 +253,7 @@ function Recap({ live }: { live: LiveGame }) {
           onClick={actions.undo}
           className="rounded-md border border-line-strong px-3 py-1.5 text-sm"
         >
-          Undo end
+          {undoLabel ?? "Undo"}
         </button>
       )}
 

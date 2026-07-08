@@ -485,8 +485,14 @@ export async function incrementSavedLineUsage(
   return row ? toSavedLine(row) : null;
 }
 
-export async function deleteSavedLine(id: string): Promise<void> {
-  await db.delete(savedLines).where(eq(savedLines.id, id));
+/** Returns the deleted line's teamId (for the caller to broadcast on), or
+ *  null if it didn't exist. */
+export async function deleteSavedLine(id: string): Promise<string | null> {
+  const [row] = await db
+    .delete(savedLines)
+    .where(eq(savedLines.id, id))
+    .returning({ teamId: savedLines.teamId });
+  return row?.teamId ?? null;
 }
 
 function toSavedLine(row: typeof savedLines.$inferSelect): SavedLine {
@@ -612,7 +618,12 @@ export async function createGame(input: CreateGameInput): Promise<GameFull> {
  */
 export async function resolveFlip(
   gameId: string,
-  patch: { fieldSide: "left" | "right"; teamColor: "light" | "dark"; startingOD: OD },
+  patch: {
+    fieldSide: "left" | "right";
+    teamColor: "light" | "dark";
+    startingOD: OD;
+    startingGenderRatio?: GenderRatio;
+  },
 ): Promise<Game> {
   const [existing] = await db.select().from(games).where(eq(games.id, gameId));
   if (!existing) throw new Error("Game not found");
@@ -625,7 +636,44 @@ export async function resolveFlip(
       fieldSide: patch.fieldSide,
       teamColor: patch.teamColor,
       startingOD: patch.startingOD,
+      startingGenderRatio: patch.startingGenderRatio,
       status: "in_progress",
+    })
+    .where(eq(games.id, gameId))
+    .returning();
+  return toGame(row!);
+}
+
+/**
+ * Reverts a resolved flip, moving an "in_progress" game back to "scheduled"
+ * and clearing the fields resolveFlip set (fieldSide/teamColor/
+ * startingGenderRatio, and resetting startingOD to its unread placeholder).
+ * Only allowed before the game's first point has been recorded — once a
+ * point exists, its O/D and gender ratio were derived from these values, so
+ * changing them out from under existing history would desync the log.
+ */
+export async function undoFlip(gameId: string): Promise<Game> {
+  const [existing] = await db.select().from(games).where(eq(games.id, gameId));
+  if (!existing) throw new Error("Game not found");
+  if (existing.status !== "in_progress") {
+    throw new Error("This game isn't awaiting a flip undo");
+  }
+  const [firstPoint] = await db
+    .select({ id: points.id })
+    .from(points)
+    .where(eq(points.gameId, gameId))
+    .limit(1);
+  if (firstPoint) {
+    throw new Error("Can't undo the flip after the game has started");
+  }
+  const [row] = await db
+    .update(games)
+    .set({
+      fieldSide: null,
+      teamColor: null,
+      startingGenderRatio: null,
+      startingOD: "O",
+      status: "scheduled",
     })
     .where(eq(games.id, gameId))
     .returning();

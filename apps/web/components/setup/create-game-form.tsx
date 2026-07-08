@@ -38,7 +38,6 @@ export function CreateGameForm({
   const [opponent, setOpponent] = useState("");
   const [cap, setCap] = useState<GameCap>(13);
   const [timeouts, setTimeouts] = useState(2);
-  const [manMajorityFirst, setManMajorityFirst] = useState(true);
   const [fieldNumber, setFieldNumber] = useState("");
   const [gameDate, setGameDate] = useState(tournamentStartDate ?? "");
   const [startTime, setStartTime] = useState("");
@@ -91,11 +90,6 @@ export function CreateGameForm({
         opponentName: opponent.trim() || "Opponent",
         gameCap: cap,
         timeoutsPerHalf: timeouts,
-        startingGenderRatio: isMixed
-          ? manMajorityFirst
-            ? "4MMP_3WMP"
-            : "4WMP_3MMP"
-          : undefined,
         fieldNumber: fieldNumber.trim() || undefined,
         gameDate: gameDate || undefined,
         startTime: startTime.trim() || undefined,
@@ -192,19 +186,6 @@ export function CreateGameForm({
             className="rounded border border-line-strong px-3 py-2"
           />
         </label>
-        {isMixed && (
-          <label className="flex flex-col gap-1">
-            <span className="text-muted">First point majority</span>
-            <select
-              value={manMajorityFirst ? "MMP" : "WMP"}
-              onChange={(e) => setManMajorityFirst(e.target.value === "MMP")}
-              className="rounded border border-line-strong px-3 py-2"
-            >
-              <option value="MMP">4 MMP / 3 WMP</option>
-              <option value="WMP">4 WMP / 3 MMP</option>
-            </select>
-          </label>
-        )}
       </div>
 
       {selectable && (

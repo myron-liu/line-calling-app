@@ -16,6 +16,7 @@ import {
   type Game,
   type GameLogState,
   type GameMeta,
+  type GenderRatio,
   type LiveGameState,
   type OD,
   type Point,
@@ -54,10 +55,24 @@ import {
   incrementLineUsage,
   readSavedLines,
 } from "@/lib/storage/savedLines";
-import { resolveFlip as resolveFlipApi } from "@/lib/storage/games";
+import {
+  resolveFlip as resolveFlipApi,
+  undoFlip as undoFlipApi,
+} from "@/lib/storage/games";
 
 /** Saved lines are team-scoped (§4.3). */
 const savedLinesScope = (game: Game): string => game.teamId;
+
+/** What a RedoAction's underlying transition is called in the UI, so the
+ *  undo/redo buttons can say precisely what they'll do (e.g. "Undo line" on
+ *  the point_in_progress/"we scored?" view vs "Undo point" on awaiting_line)
+ *  instead of a generic "Undo". */
+const REDO_ACTION_WORD: Record<RedoAction["type"], string> = {
+  confirmLine: "line",
+  recordResult: "point",
+  callHalftime: "halftime",
+  endGame: "end",
+};
 
 /** Sync status for the "Last synced" indicator + manual resync button (§ live
  *  caller shell). There's no lingering "conflict" state: whenever the server
@@ -89,6 +104,10 @@ export interface LiveGame {
    *  should hide rather than disable them when these are false. */
   canUndo: boolean;
   canRedo: boolean;
+  /** What the undo/redo buttons would actually do, e.g. "Undo line" vs
+   *  "Undo point" — null exactly when canUndo/canRedo is false. */
+  undoLabel: string | null;
+  redoLabel: string | null;
   sync: SyncState;
   actions: {
     confirmLine: (lineup: string[]) => void;
@@ -116,7 +135,11 @@ export interface LiveGame {
       fieldSide: "left" | "right";
       teamColor: "light" | "dark";
       startingOD: OD;
+      startingGenderRatio?: GenderRatio;
     }) => Promise<void>;
+    /** Reverts a resolved flip back to "scheduled" — only valid before the
+     *  game's first point has been recorded (see queries.ts's undoFlip). */
+    undoFlip: () => Promise<void>;
   };
   error: string | null;
 }
@@ -217,8 +240,19 @@ export function useLiveGame(gameId: string): LiveGameResult {
   // or one that bounced someone else's stale attempt — the same rule
   // applies: if the server is further along than our local version, don't
   // try to save a transition computed off data that's already stale; just
-  // refresh (adopt the server's state wholesale) instead. hadPending only
-  // controls whether we tell the coach local changes were replaced.
+  // refresh (adopt the server's state wholesale) instead.
+  //
+  // The server broadcasts a game's own writer back to itself too (it has no
+  // way to know which open connection is "the one that just wrote"), and it
+  // does so *before* that writer's own PUT /games/:id/sync response comes
+  // back — so this handler can see the version bump before commit()'s own
+  // flush().then() has run. If we have a pending outbox event for this game,
+  // that in-flight write is almost certainly what this broadcast is echoing
+  // back, not a foreign update; skip it and let that flush's own result
+  // reconcile things (a clean success, or, if it really was overtaken, a 409
+  // that correctly reports the replacement). Without this guard, a coach
+  // making changes alone on one device would routinely see "updated from
+  // another device" for their own actions.
   useEffect(() => {
     const source = new EventSource(apiUrl(`/games/${gameId}/events`));
     source.onmessage = (ev) => {
@@ -231,15 +265,34 @@ export function useLiveGame(gameId: string): LiveGameResult {
       }
       const current = gameRef.current;
       if (!current || data.version <= current.version) return;
-      const hadPending = pendingCountFor(gameId) > 0;
+      if (pendingCountFor(gameId) > 0) return;
       setSyncState((s) => ({ ...s, status: "syncing" }));
       api
         .get<GameFull>(`/games/${gameId}/full`)
-        .then((full) => adoptServerState(full, hadPending))
+        .then((full) => adoptServerState(full, false))
         .catch(() => {});
     };
     return () => source.close();
   }, [gameId, adoptServerState]);
+
+  // Saved-lines updates (see apps/server/src/sse.ts's savedLinesChannel):
+  // deliberately independent of the game-sync machinery above. Pods are a
+  // team-scoped, reusable resource — creating/editing/using/deleting one on
+  // another device should just refresh this device's saved-lines list, never
+  // touch `game`/`log`/syncState or run through adoptServerState. This is
+  // also what lets *this* device's own saveLine/recordLineUsage calls (which
+  // don't go through commit()/the outbox at all) stay fully decoupled from
+  // the game's own version/conflict handling.
+  const teamId = game?.teamId;
+  useEffect(() => {
+    if (!teamId) return;
+    const source = new EventSource(apiUrl(`/teams/${teamId}/saved-lines/events`));
+    source.onmessage = (ev) => {
+      if (!ev.data) return;
+      readSavedLines(teamId).then(setSavedLines);
+    };
+    return () => source.close();
+  }, [teamId]);
 
   // Best-effort background sync, once on load: pick up roster changes made
   // server-side (e.g. a tournament check-in edit) since this game was created,
@@ -490,8 +543,13 @@ export function useLiveGame(gameId: string): LiveGameResult {
         fieldSide: "left" | "right";
         teamColor: "light" | "dark";
         startingOD: OD;
+        startingGenderRatio?: GenderRatio;
       }) => {
         const updated = await resolveFlipApi(gameId, patch);
+        setGame(updated);
+      },
+      undoFlip: async () => {
+        const updated = await undoFlipApi(gameId);
         setGame(updated);
       },
     }),
@@ -500,6 +558,25 @@ export function useLiveGame(gameId: string): LiveGameResult {
 
   if (notFound) return { status: "not_found" };
   if (!game || !log || !state) return { status: "loading" };
+
+  const canUndo =
+    log.meta.endedManually ||
+    log.points.length > 0 ||
+    (log.meta.halftimeReached && !deriveHalftimeReached(game, log.points));
+
+  // What undo would actually do, without applying it — undoLastPoint is a
+  // pure reducer, so calling it just to read `.redo.type` is safe. This
+  // keeps the label derivation identical to the real undo logic (see
+  // packages/game-rules/src/state.ts) instead of a second, driftable copy.
+  let undoLabel: string | null = null;
+  if (canUndo) {
+    try {
+      undoLabel = `Undo ${REDO_ACTION_WORD[undoLastPoint(game, log).redo.type]}`;
+    } catch {
+      undoLabel = null;
+    }
+  }
+  const redoLabel = pendingRedo ? `Redo ${REDO_ACTION_WORD[pendingRedo.type]}` : null;
 
   return {
     status: "ready",
@@ -510,11 +587,10 @@ export function useLiveGame(gameId: string): LiveGameResult {
       points: log.points,
       savedLines,
       carryOver,
-      canUndo:
-        log.meta.endedManually ||
-        log.points.length > 0 ||
-        (log.meta.halftimeReached && !deriveHalftimeReached(game, log.points)),
+      canUndo,
       canRedo: pendingRedo !== null,
+      undoLabel,
+      redoLabel,
       sync: syncState,
       actions,
       error,

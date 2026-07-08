@@ -3,7 +3,9 @@
 An ultimate frisbee **line-calling** app for coaches: pick the right 7 for each
 point while the app enforces the gender ratio (ABBA in Mixed), tracks O/D, score,
 half, timeouts, injuries, and playing time. Built to run on a phone on the sideline.
-See the [design doc](./line-calling-app-design.md) for the full spec.
+See the [design doc](./line-calling-app-design.md) for the full spec, and
+[GAME_STATE_MACHINE.md](./GAME_STATE_MACHINE.md) for the game's state machine
+and how multi-device sync/conflict resolution works.
 
 > **v0 is public.** No login — teams, rosters, tournaments, and games are shared
 > across whoever hits the API. Teams/players/tournaments/games are persisted to
