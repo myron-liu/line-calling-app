@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import type {
   GameStatus,
@@ -27,27 +27,40 @@ import {
 } from "@/lib/storage/tournaments";
 import { Modal } from "@/components/modal";
 import { displayName, odTag, roleTag, sortRoster } from "@/lib/player-display";
+import { sameById, sameJson, useCachedFetch } from "@/lib/cache";
+import { keys } from "@/lib/storage/keys";
+
+interface TeamDetailData {
+  team: Team;
+  players: Player[];
+  tournaments: Tournament[];
+}
+
+function sameTeamDetail(a: TeamDetailData, b: TeamDetailData): boolean {
+  return (
+    sameJson(a.team, b.team) &&
+    sameById(a.players, b.players) &&
+    sameById(a.tournaments, b.tournaments)
+  );
+}
 
 export function TeamDetail({ teamId }: { teamId: string }) {
-  const [team, setTeam] = useState<Team | null>(null);
-  const [players, setPlayers] = useState<Player[]>([]);
-  const [tournaments, setTournaments] = useState<Tournament[]>([]);
+  const { data, refresh } = useCachedFetch<TeamDetailData | null>(
+    keys.teamDetail(teamId),
+    async () => {
+      const [t, players, tournaments] = await Promise.all([
+        readTeam(teamId),
+        readPlayers(teamId),
+        readTournaments(teamId),
+      ]);
+      return t ? { team: t, players, tournaments } : null;
+    },
+    (a, b) => (a === null || b === null ? a === b : sameTeamDetail(a, b)),
+    [teamId],
+  );
 
-  const reload = useCallback(async () => {
-    const [t, p, ts] = await Promise.all([
-      readTeam(teamId),
-      readPlayers(teamId),
-      readTournaments(teamId),
-    ]);
-    setTeam(t);
-    setPlayers(p);
-    setTournaments(ts);
-  }, [teamId]);
-  useEffect(() => {
-    reload();
-  }, [reload]);
-
-  if (!team) return <p className="text-muted">Loading…</p>;
+  if (!data) return <p className="text-muted">Loading…</p>;
+  const { team, players, tournaments } = data;
 
   return (
     <section className="space-y-8">
@@ -58,18 +71,14 @@ export function TeamDetail({ teamId }: { teamId: string }) {
         </span>
       </div>
 
-      <Roster
-        teamId={teamId}
-        players={players}
-        onChange={() => readPlayers(teamId).then(setPlayers)}
-      />
+      <Roster teamId={teamId} players={players} onChange={refresh} />
 
       <Tournaments
         team={team}
         tournaments={tournaments}
         onCreate={async (name, date) => {
           await createTournament(teamId, name, team.division, date);
-          setTournaments(await readTournaments(teamId));
+          await refresh();
         }}
       />
     </section>

@@ -1,27 +1,28 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import type { Division, Team } from "@shared/game-rules";
 import { createTeam, readTeams } from "@/lib/storage/teams";
+import { sameById, useCachedFetch } from "@/lib/cache";
+import { keys } from "@/lib/storage/keys";
 
 export function TeamsList() {
-  const [teams, setTeams] = useState<Team[] | null>(null);
+  const { data: teams, error: fetchError, refresh } = useCachedFetch<Team[]>(
+    keys.teams,
+    readTeams,
+    sameById,
+    [],
+  );
   const [name, setName] = useState("");
   const [division, setDivision] = useState<Division>("mixed");
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    readTeams()
-      .then(setTeams)
-      .catch((err) => setError(err instanceof Error ? err.message : String(err)));
-  }, []);
 
   const add = async () => {
     if (!name.trim()) return;
     try {
       await createTeam(name.trim(), division);
-      setTeams(await readTeams());
+      await refresh();
       setName("");
       setError(null);
     } catch (err) {
@@ -29,7 +30,13 @@ export function TeamsList() {
     }
   };
 
-  if (teams === null) return <p className="text-muted">Loading…</p>;
+  if (teams === null) {
+    return (
+      <p className={fetchError ? "text-red-600 dark:text-red-400" : "text-muted"}>
+        {fetchError ?? "Loading…"}
+      </p>
+    );
+  }
 
   return (
     <section className="space-y-6">

@@ -9,8 +9,12 @@ export const SCHEMA_VERSION = 1;
 const prefix = `${NAMESPACE}:v${SCHEMA_VERSION}`;
 
 export const keys = {
-  /** All teams (v0 is public/single-device, so one array is fine). */
+  /** Last-known-good /teams list, so the page renders instantly instead of a
+   *  loading flash on every visit — see lib/cache.ts. */
   teams: `${prefix}:teams`,
+  /** Last-known-good team + roster + tournaments for one team's detail page
+   *  (a single blob since they're always fetched/compared together). */
+  teamDetail: (teamId: string) => `${prefix}:team:${teamId}:detail-cache`,
   /** The team roster: every Player on a team (§4.1). */
   players: (teamId: string) => `${prefix}:team:${teamId}:players`,
   /** Tournaments belonging to a team (§4.2). */

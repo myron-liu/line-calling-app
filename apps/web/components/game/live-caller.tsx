@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   genderStateLabel,
   ratioCounts,
@@ -121,8 +121,12 @@ function RatioBadge({ live }: { live: LiveGame }) {
   const { state } = live;
   if (!state.genderRatio) return null;
   const need = ratioCounts(state.genderRatio);
+  const isMmpMajority = state.genderRatio === "4MMP_3WMP";
+  const tone = isMmpMajority
+    ? "bg-sky-100 dark:bg-sky-500/20 text-sky-800 dark:text-sky-300"
+    : "bg-rose-100 dark:bg-rose-500/20 text-rose-800 dark:text-rose-300";
   return (
-    <span className="rounded bg-violet-100 dark:bg-violet-500/20 px-2 py-0.5 font-medium text-violet-800 dark:text-violet-300">
+    <span className={`rounded px-2 py-0.5 font-medium ${tone}`}>
       {need.mmp} MMP / {need.wmp} WMP
     </span>
   );
@@ -147,6 +151,8 @@ const GENDER = {
     badge: "bg-rose-600",
   },
 } as const;
+
+type SortMode = "roster" | "recency" | "playtime";
 
 function LineBuilder({
   live,
@@ -184,6 +190,8 @@ function LineBuilder({
     () => eligible.filter((p) => p.odPreference !== "O"),
     [eligible],
   );
+  const oIds = useMemo(() => new Set(oGroup.map((p) => p.playerId)), [oGroup]);
+  const dIds = useMemo(() => new Set(dGroup.map((p) => p.playerId)), [dGroup]);
 
   // Points sat out since each player's last start (never-played = all completed
   // points so far). Flags long benches in the roster columns below.
@@ -205,7 +213,15 @@ function LineBuilder({
     (seed ?? []).filter((id) => eligibleIds.has(id)),
   );
   const [applyNote, setApplyNote] = useState<string | null>(null);
-  const [sortMode, setSortMode] = useState<"roster" | "recency">("roster");
+  const [sortMode, setSortMode] = useState<SortMode>("roster");
+  // Which O/D accordion(s) are open — starts on whichever matches this point's
+  // side, but applying a saved line/pod can force one or both open too (see
+  // applyLine below). Genuinely controlled (not just an initial value) so we
+  // can open it programmatically after the initial render.
+  const [openSections, setOpenSections] = useState({
+    O: state.od === "O",
+    D: state.od === "D",
+  });
   // Prune anyone who becomes ineligible (e.g. marked injured mid-build) without
   // resetting the rest of the pick — this only fires within the same point, since
   // a new point remounts LineBuilder via its `key` and re-seeds from scratch.
@@ -344,6 +360,14 @@ function LineBuilder({
         ? `${skipped} player${skipped > 1 ? "s" : ""} skipped (unavailable or over-ratio)`
         : null,
     );
+    // Open whichever accordion(s) this pod's players actually live in, so the
+    // coach can see them without having to hunt for the collapsed section —
+    // never closes the other one, only opens what's relevant.
+    const hasO = line.playerIds.some((id) => oIds.has(id));
+    const hasD = line.playerIds.some((id) => dIds.has(id));
+    if (hasO || hasD) {
+      setOpenSections((s) => ({ O: s.O || hasO, D: s.D || hasD }));
+    }
   };
 
   return (
@@ -367,10 +391,8 @@ function LineBuilder({
         lines={quickLines}
         appliedIds={appliedLineIds}
         ratioLabel={need ? `${maxMMP}M / ${maxWMP}W` : "any 7"}
-        selectedCount={selected.length}
         onApply={applyLine}
         onDelete={actions.deleteLine}
-        onSave={(name) => actions.saveLine(name, selected)}
         note={applyNote}
       />
 
@@ -379,12 +401,7 @@ function LineBuilder({
         onToggle={(id, injured) => actions.setInjured(id, injured)}
       />
 
-      <p className="flex items-center gap-1 text-[10px] text-faint">
-        <BenchGapBadge value="n" flagged={false} /> = points since a player last
-        started a point.
-      </p>
-
-      <div className="flex items-center gap-2 text-xs">
+      <div className="flex flex-wrap items-center gap-2 text-xs">
         <span className="text-faint">Sort:</span>
         <SortToggleButton
           label="Roster"
@@ -396,12 +413,18 @@ function LineBuilder({
           active={sortMode === "recency"}
           onClick={() => setSortMode("recency")}
         />
+        <SortToggleButton
+          label="Least points played"
+          active={sortMode === "playtime"}
+          onClick={() => setSortMode("playtime")}
+        />
       </div>
 
       <ODAccordion
         label="Offense"
         tone="O"
-        defaultOpen={state.od === "O"}
+        open={openSections.O}
+        onOpenChange={(open) => setOpenSections((s) => ({ ...s, O: open }))}
         players={oGroup}
         selected={selected}
         slotLabels={slotLabels}
@@ -415,7 +438,8 @@ function LineBuilder({
       <ODAccordion
         label="Defense"
         tone="D"
-        defaultOpen={state.od === "D"}
+        open={openSections.D}
+        onOpenChange={(open) => setOpenSections((s) => ({ ...s, D: open }))}
         players={dGroup}
         selected={selected}
         slotLabels={slotLabels}
@@ -425,6 +449,11 @@ function LineBuilder({
         mmpFull={mmpFull}
         wmpFull={wmpFull}
         onToggle={toggle}
+      />
+
+      <SaveLineButton
+        selectedCount={selected.length}
+        onSave={(name) => actions.saveLine(name, selected)}
       />
 
       <button
@@ -445,9 +474,10 @@ function LineBuilder({
 
 // Collapsible O/D grouping (§8): splits the eligible roster by preferred side so
 // the coach can jump straight to the relevant half of the roster for this point.
-// "both"/unset players show up in both accordions. Opens by default on whichever
-// side matches the point's current O/D; the other stays collapsed but reachable
-// (e.g. to pull in a sub who normally plays the other side).
+// "both"/unset players show up in both accordions. Open state starts on
+// whichever side matches the point's current O/D and is otherwise fully
+// controlled by the parent (LineBuilder), which also force-opens a side when
+// a saved line/pod with players on it is applied.
 const OD_ACCORDION_TONE = {
   O: {
     border: "border-sky-300 dark:border-sky-500/40",
@@ -459,33 +489,16 @@ const OD_ACCORDION_TONE = {
   },
 } as const;
 
-// A player flagged once they've sat out more than this many completed points
-// in a row.
-const BENCH_FLAG_THRESHOLD = 4;
+// The "last played N points ago" text reads neutral gray at 0 and ramps
+// toward red as N grows, saturating fully by this many points.
+const BENCH_GAP_SATURATION = 8;
+const BENCH_GAP_FROM = [148, 163, 184] as const; // slate-400 — reads fine in both themes
+const BENCH_GAP_TO = [239, 68, 68] as const; // red-500
 
-// Small circular badge for the "points since last started" indicator — shared by
-// the roster rows and the legend, so the legend's example matches exactly.
-function BenchGapBadge({
-  value,
-  flagged,
-  title,
-}: {
-  value: ReactNode;
-  flagged: boolean;
-  title?: string;
-}) {
-  return (
-    <span
-      className={`inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full px-1 text-[10px] font-semibold ${
-        flagged
-          ? "bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300"
-          : "bg-surface-2 text-faint"
-      }`}
-      title={title}
-    >
-      {value}
-    </span>
-  );
+function benchGapColor(gap: number): string {
+  const t = Math.min(Math.max(gap, 0) / BENCH_GAP_SATURATION, 1);
+  const [r, g, b] = BENCH_GAP_FROM.map((c, i) => Math.round(c + (BENCH_GAP_TO[i]! - c) * t));
+  return `rgb(${r}, ${g}, ${b})`;
 }
 
 function SortToggleButton({
@@ -515,7 +528,8 @@ function SortToggleButton({
 function ODAccordion({
   label,
   tone,
-  defaultOpen,
+  open,
+  onOpenChange,
   players,
   selected,
   slotLabels,
@@ -528,20 +542,25 @@ function ODAccordion({
 }: {
   label: string;
   tone: "O" | "D";
-  defaultOpen: boolean;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
   players: RosterSnapshotEntry[];
   selected: string[];
   slotLabels: Record<string, string>;
   pointsPlayed: Record<string, number>;
   benchGap: Record<string, number>;
-  sortMode: "roster" | "recency";
+  sortMode: SortMode;
   mmpFull: boolean;
   wmpFull: boolean;
   onToggle: (id: string) => void;
 }) {
   const t = OD_ACCORDION_TONE[tone];
   return (
-    <details open={defaultOpen} className={`rounded-lg border p-2 ${t.border}`}>
+    <details
+      open={open}
+      onToggle={(e) => onOpenChange(e.currentTarget.open)}
+      className={`rounded-lg border p-2 ${t.border}`}
+    >
       <summary className={`cursor-pointer text-sm font-semibold ${t.text}`}>
         {label} <span className="font-normal text-faint">({players.length})</span>
       </summary>
@@ -574,6 +593,18 @@ function sortByRecency<T extends RosterSnapshotEntry>(
   });
 }
 
+/** Fewest total points played first; ties broken by name. */
+function sortByFewestPlayed<T extends RosterSnapshotEntry>(
+  players: T[],
+  pointsPlayed: Record<string, number>,
+): T[] {
+  return [...players].sort((a, b) => {
+    const diff = (pointsPlayed[a.playerId] ?? 0) - (pointsPlayed[b.playerId] ?? 0);
+    if (diff !== 0) return diff;
+    return displayName(a).localeCompare(displayName(b));
+  });
+}
+
 function GenderColumns({
   players,
   selected,
@@ -590,14 +621,17 @@ function GenderColumns({
   slotLabels: Record<string, string>;
   pointsPlayed: Record<string, number>;
   benchGap: Record<string, number>;
-  sortMode: "roster" | "recency";
+  sortMode: SortMode;
   mmpFull: boolean;
   wmpFull: boolean;
   onToggle: (id: string) => void;
 }) {
-  const sort = sortMode === "recency"
-    ? (list: RosterSnapshotEntry[]) => sortByRecency(list, benchGap)
-    : sortRoster;
+  const sort =
+    sortMode === "recency"
+      ? (list: RosterSnapshotEntry[]) => sortByRecency(list, benchGap)
+      : sortMode === "playtime"
+        ? (list: RosterSnapshotEntry[]) => sortByFewestPlayed(list, pointsPlayed)
+        : sortRoster;
   return (
     <div className="grid grid-cols-2 gap-3">
       <RosterColumn
@@ -664,26 +698,27 @@ function RosterColumn({
                   isSel ? tone.selected : tone.idle
                 } ${disabled ? "opacity-40" : ""}`}
               >
-                <span className="flex min-w-0 flex-1 items-center gap-1">
-                  {isSel && (
-                    <span
-                      className={`shrink-0 rounded px-1.5 py-0.5 text-xs font-semibold text-white ${tone.badge}`}
-                    >
-                      {slotLabels[p.playerId]}
+                <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
+                  <span className="flex w-full items-center gap-1">
+                    {isSel && (
+                      <span
+                        className={`shrink-0 rounded px-1.5 py-0.5 text-xs font-semibold text-white ${tone.badge}`}
+                      >
+                        {slotLabels[p.playerId]}
+                      </span>
+                    )}
+                    <span className="min-w-0 flex-1 truncate text-left">
+                      {displayName(p)}
                     </span>
-                  )}
-                  <span className="min-w-0 flex-1 truncate text-left">
-                    {displayName(p)}
+                    <span className="shrink-0 rounded bg-surface-2 px-1 text-[10px] font-medium text-muted">
+                      {roleTag(p.role)}
+                    </span>
                   </span>
-                  <span className="shrink-0 rounded bg-surface-2 px-1 text-[10px] font-medium text-muted">
-                    {roleTag(p.role)}
-                  </span>
-                  <span className="shrink-0">
-                    <BenchGapBadge
-                      value={benchGap[p.playerId] ?? 0}
-                      flagged={(benchGap[p.playerId] ?? 0) > BENCH_FLAG_THRESHOLD}
-                      title={`${benchGap[p.playerId] ?? 0} points since last started`}
-                    />
+                  <span
+                    className="text-[10px]"
+                    style={{ color: benchGapColor(benchGap[p.playerId] ?? 0) }}
+                  >
+                    Last played {benchGap[p.playerId] ?? 0} points ago
                   </span>
                 </span>
                 <span className="shrink-0 text-xs text-faint">
@@ -792,60 +827,22 @@ function SavedLinesBar({
   lines,
   appliedIds,
   ratioLabel,
-  selectedCount,
   onApply,
   onDelete,
-  onSave,
   note,
 }: {
   lines: QuickLine[];
   appliedIds: Set<string>;
   ratioLabel: string;
-  selectedCount: number;
   onApply: (line: SavedLine) => void;
   onDelete: (id: string) => void;
-  onSave: (name: string) => void;
   note: string | null;
 }) {
-  const [saving, setSaving] = useState(false);
-  const [name, setName] = useState("");
-  const canSave = selectedCount >= 1 && selectedCount <= 7;
-
   return (
     <div className="space-y-2 rounded-lg border border-line p-2">
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-medium uppercase tracking-wide text-faint">
-          Quick lines · {ratioLabel}
-        </span>
-        <button
-          onClick={() => setSaving((s) => !s)}
-          disabled={!canSave}
-          className="text-xs font-medium text-emerald-700 dark:text-emerald-400 disabled:text-faint"
-        >
-          + Save {selectedCount === 7 ? "line" : "pod"} ({selectedCount})
-        </button>
-      </div>
-
-      {saving && canSave && (
-        <div className="flex gap-2">
-          <input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder={selectedCount === 7 ? "Line name (e.g. O-line)" : "Pod name (e.g. Handler core)"}
-            className="flex-1 rounded border border-line-strong px-2 py-1 text-sm"
-          />
-          <button
-            onClick={() => {
-              onSave(name.trim() || (selectedCount === 7 ? "Line" : "Pod"));
-              setName("");
-              setSaving(false);
-            }}
-            className="rounded bg-emerald-600 px-3 py-1 text-sm font-medium text-white"
-          >
-            Save
-          </button>
-        </div>
-      )}
+      <span className="text-xs font-medium uppercase tracking-wide text-faint">
+        Quick lines · {ratioLabel}
+      </span>
 
       {lines.length === 0 ? (
         <p className="text-xs text-faint">
@@ -898,6 +895,63 @@ function SavedLinesBar({
       )}
 
       {note && <p className="text-xs text-amber-600 dark:text-amber-400">{note}</p>}
+    </div>
+  );
+}
+
+// Save the current selection as a reusable line/pod — sits directly above
+// Confirm line, the natural moment to also bank a line for reuse.
+function SaveLineButton({
+  selectedCount,
+  onSave,
+}: {
+  selectedCount: number;
+  onSave: (name: string) => void;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [name, setName] = useState("");
+  const canSave = selectedCount >= 1 && selectedCount <= 7;
+
+  if (!saving) {
+    return (
+      <button
+        onClick={() => setSaving(true)}
+        disabled={!canSave}
+        className="w-full rounded-lg border border-dashed border-line-strong py-2 text-sm font-medium text-muted disabled:opacity-40"
+      >
+        + Save {selectedCount === 7 ? "line" : "pod"} ({selectedCount})
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex gap-2">
+      <input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder={selectedCount === 7 ? "Line name (e.g. O-line)" : "Pod name (e.g. Handler core)"}
+        className="flex-1 rounded border border-line-strong px-2 py-1.5 text-sm"
+        autoFocus
+      />
+      <button
+        onClick={() => {
+          onSave(name.trim() || (selectedCount === 7 ? "Line" : "Pod"));
+          setName("");
+          setSaving(false);
+        }}
+        className="rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white"
+      >
+        Save
+      </button>
+      <button
+        onClick={() => {
+          setSaving(false);
+          setName("");
+        }}
+        className="rounded-md border border-line-strong px-3 py-1.5 text-sm"
+      >
+        Cancel
+      </button>
     </div>
   );
 }
