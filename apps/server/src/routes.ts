@@ -188,6 +188,10 @@ export const routes: Route[] = [
     const t = await q.getTournament(id!);
     return t ? json(t) : notFound();
   }),
+  route("DELETE", "/tournaments/:id", async (_req, { id }) => {
+    await q.deleteTournament(id!);
+    return json({ ok: true });
+  }),
 
   // ── Tournament check-in roster ─────────────────────────────────────────────
   route("GET", "/tournaments/:id/roster", async (_req, { id }) =>

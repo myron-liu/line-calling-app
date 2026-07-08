@@ -207,6 +207,10 @@ export async function createTournament(input: {
   return toTournament(row!);
 }
 
+export async function deleteTournament(id: string): Promise<void> {
+  await db.delete(tournaments).where(eq(tournaments.id, id));
+}
+
 function toTournament(row: typeof tournaments.$inferSelect): Tournament {
   return {
     id: row.id,

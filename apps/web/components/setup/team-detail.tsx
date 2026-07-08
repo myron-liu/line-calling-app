@@ -28,7 +28,13 @@ import {
 } from "@/lib/storage/tournaments";
 import { updateGameMetadata, type GameMetadataPatch } from "@/lib/storage/games";
 import { Modal } from "@/components/modal";
-import { displayName, odTag, roleTag, sortRoster } from "@/lib/player-display";
+import {
+  ROLE_BADGE_COLOR,
+  displayName,
+  odTag,
+  roleTag,
+  sortRoster,
+} from "@/lib/player-display";
 import { sameById, sameJson, useCachedFetch } from "@/lib/cache";
 import { keys } from "@/lib/storage/keys";
 
@@ -399,9 +405,12 @@ function RosterRow({
   return (
     <li className={`flex items-center gap-1 rounded-md border px-2 py-1.5 text-[13px] ${tone.border}`}>
       <span className="flex min-w-0 flex-1 items-center gap-1">
-        <span className={`shrink-0 ${tone.text}`}>{p.genderMatch}</span>
+        <span
+          className={`shrink-0 rounded px-1 text-[10px] font-semibold ${ROLE_BADGE_COLOR[p.role]}`}
+        >
+          {roleTag(p.role)}
+        </span>
         <span className="min-w-0 flex-1 truncate">{displayName(p)}</span>
-        <span className="shrink-0 text-[10px] text-faint">{roleTag(p.role)}</span>
         <span className="shrink-0 text-[10px] text-faint">{odTag(p.odPreference)}</span>
       </span>
       <button
