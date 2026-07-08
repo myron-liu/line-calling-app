@@ -58,9 +58,11 @@ import {
 const savedLinesScope = (game: Game): string => game.teamId;
 
 /** Sync status for the "Last synced" indicator + manual resync button (§ live
- *  caller shell). "conflict" means an automatic flush was rejected because
- *  another device synced this game more recently — resolved via resyncNow. */
-export type SyncStatusKind = "idle" | "syncing" | "synced" | "conflict" | "offline";
+ *  caller shell). There's no lingering "conflict" state: whenever the server
+ *  turns out to be further along than our local version, we don't try to
+ *  save a transition computed off stale data — we just refresh (adopt the
+ *  server's state wholesale) and briefly show "syncing" while that happens. */
+export type SyncStatusKind = "idle" | "syncing" | "synced" | "offline";
 
 export interface SyncState {
   status: SyncStatusKind;
@@ -203,13 +205,12 @@ export function useLiveGame(gameId: string): LiveGameResult {
 
   // Real-time conflict notifications (see apps/server/src/sse.ts): while this
   // game is open, learn about another device's write immediately instead of
-  // only on our own next (rejected) sync attempt. Whether the pushed version
-  // came from a clean write or one that bounced someone else's stale attempt
-  // doesn't change what *we* should do with it: if we have nothing pending,
-  // a newer version is harmless to adopt quietly; if we do, our own base is
-  // now stale, so surface a conflict instead (commit() below refuses to
-  // write further until the coach resolves it via resyncNow) rather than
-  // silently discarding or clobbering either side.
+  // only on our own next (rejected) sync attempt. Either way — a clean write
+  // or one that bounced someone else's stale attempt — the same rule
+  // applies: if the server is further along than our local version, don't
+  // try to save a transition computed off data that's already stale; just
+  // refresh (adopt the server's state wholesale) instead. hadPending only
+  // controls whether we tell the coach local changes were replaced.
   useEffect(() => {
     const source = new EventSource(apiUrl(`/games/${gameId}/events`));
     source.onmessage = (ev) => {
@@ -222,13 +223,11 @@ export function useLiveGame(gameId: string): LiveGameResult {
       }
       const current = gameRef.current;
       if (!current || data.version <= current.version) return;
-      if (pendingCountFor(gameId) > 0) {
-        setSyncState((s) => ({ ...s, status: "conflict" }));
-        return;
-      }
+      const hadPending = pendingCountFor(gameId) > 0;
+      setSyncState((s) => ({ ...s, status: "syncing" }));
       api
         .get<GameFull>(`/games/${gameId}/full`)
-        .then((full) => adoptServerState(full, false))
+        .then((full) => adoptServerState(full, hadPending))
         .catch(() => {});
     };
     return () => source.close();
@@ -262,9 +261,9 @@ export function useLiveGame(gameId: string): LiveGameResult {
       .catch(() => {});
 
     // Flush any outbox backlog left over from a previous offline session.
-    // flush() itself no-ops if there's nothing pending. A conflict here is
-    // surfaced (not auto-resolved) — the coach resolves it via resyncNow, so an
-    // automatic background pass never silently discards local changes.
+    // flush() itself no-ops if there's nothing pending. A conflict here means
+    // the game moved on while we were offline — refresh rather than leave the
+    // coach staring at a blocked state (see adoptServerState).
     flush(gameId, {
       version: game.version,
       meta: readMeta(gameId) ?? defaultMeta(game),
@@ -275,8 +274,10 @@ export function useLiveGame(gameId: string): LiveGameResult {
         const updated = readGameConfig(gameId);
         if (updated) setGame(updated);
         setSyncState({ status: "synced", lastSyncedAt: readLastSyncedAt(gameId) });
-      } else if (result.status === "conflict" || result.status === "offline") {
-        setSyncState((s) => ({ ...s, status: result.status }));
+      } else if (result.status === "conflict") {
+        adoptServerState(result.full, true);
+      } else if (result.status === "offline") {
+        setSyncState((s) => ({ ...s, status: "offline" }));
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -287,19 +288,13 @@ export function useLiveGame(gameId: string): LiveGameResult {
     [game, log],
   );
 
-  /** Persist a new log state, mirror to the outbox, and best-effort sync.
-   *  Refuses to write at all while a conflict is outstanding (surfaced by
-   *  either a rejected flush or the real-time SSE notification above) — the
-   *  coach must resolve it via resyncNow first, rather than the local log
-   *  drifting further from a base the server already moved past. */
+  /** Persist a new log state, mirror to the outbox, and best-effort sync. If
+   *  the flush comes back rejected because the server is further along than
+   *  the version we just wrote against, we don't leave that transition
+   *  sitting in local storage — adoptServerState overwrites it wholesale
+   *  with the server's current state instead (see below). */
   const commit = useCallback(
     (next: GameLogState, type: OutboxEventType, payload: unknown) => {
-      if (syncState.status === "conflict") {
-        setError(
-          "This game was updated on another device — tap “Sync now” above before making further changes.",
-        );
-        return;
-      }
       // Any real log mutation invalidates a pending redo — it was only ever
       // valid for replaying exactly the undo that produced it. undo() and
       // redo() themselves set the redo state explicitly right after this.
@@ -310,9 +305,6 @@ export function useLiveGame(gameId: string): LiveGameResult {
       setLog(next);
       setError(null);
       if (!game) return;
-      // A conflict here means another device synced this game more recently —
-      // surfaced via syncState, not auto-resolved (see resyncNow). Otherwise
-      // blind retries on every subsequent action would just keep failing.
       flush(gameId, {
         version: game.version,
         meta: next.meta,
@@ -323,12 +315,17 @@ export function useLiveGame(gameId: string): LiveGameResult {
           const updated = readGameConfig(gameId);
           if (updated) setGame(updated);
           setSyncState({ status: "synced", lastSyncedAt: readLastSyncedAt(gameId) });
-        } else if (result.status === "conflict" || result.status === "offline") {
-          setSyncState((s) => ({ ...s, status: result.status }));
+        } else if (result.status === "conflict") {
+          // The transition we just wrote was computed off a version the
+          // server has already moved past — discard it by refreshing rather
+          // than leaving it (wrongly) sitting in local storage.
+          adoptServerState(result.full, true);
+        } else if (result.status === "offline") {
+          setSyncState((s) => ({ ...s, status: "offline" }));
         }
       });
     },
-    [gameId, game, syncState.status],
+    [gameId, game, adoptServerState],
   );
 
   /** Wrap a reducer call so thrown validation errors surface, not crash. */

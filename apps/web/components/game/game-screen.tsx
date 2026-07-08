@@ -44,9 +44,12 @@ export function GameScreen({ gameId }: { gameId: string }) {
   );
 }
 
-// Per-game sync indicator + manual resync (§ conflict handling). Automatic
-// flushes happen on every commit; this surfaces the outcome and gives the coach
-// a way to push through a conflict or an offline backlog on demand.
+// Per-game sync indicator + manual resync. Automatic flushes happen on every
+// commit; when the server turns out to be further along than our version, we
+// don't block on it — we just refresh (briefly showing "Syncing…") and the
+// coach sees a note if that discarded any of their unsynced local changes
+// (see useLiveGame's adoptServerState). This bar mainly surfaces "offline"
+// and gives a manual on-demand resync.
 function SyncBar({ live }: { live: LiveGame }) {
   const { sync, actions } = live;
 
@@ -54,8 +57,6 @@ function SyncBar({ live }: { live: LiveGame }) {
     switch (sync.status) {
       case "syncing":
         return "Syncing…";
-      case "conflict":
-        return "Sync conflict — another device updated this game";
       case "offline":
         return "Offline — will retry automatically";
       default:
@@ -69,11 +70,7 @@ function SyncBar({ live }: { live: LiveGame }) {
   })();
 
   const tone =
-    sync.status === "conflict"
-      ? "text-red-600 dark:text-red-400"
-      : sync.status === "offline"
-        ? "text-amber-600 dark:text-amber-400"
-        : "text-faint";
+    sync.status === "offline" ? "text-amber-600 dark:text-amber-400" : "text-faint";
 
   return (
     <div className="flex items-center justify-between gap-2 text-xs">

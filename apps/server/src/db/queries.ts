@@ -329,12 +329,50 @@ export async function listSavedLines(teamId: string): Promise<SavedLine[]> {
   return rows.map(toSavedLine);
 }
 
+const normalizeLineName = (name: string): string => name.trim().toLowerCase();
+
+/** True iff both lists are the same set of players, order aside. */
+function samePersonnel(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const setA = new Set(a);
+  return setA.size === new Set(b).size && b.every((id) => setA.has(id));
+}
+
+/**
+ * Two coaches building lines/pods on separate devices can independently pick
+ * the same name (e.g. both call something "O-line") — rather than force a
+ * sync conflict, merge: an existing line/pod with the same name and the same
+ * personnel is just reused (no duplicate); same name but different personnel
+ * means the incoming create is the newer definition, so it replaces the old
+ * one in place (keeping its id/useCount) instead of sitting alongside it
+ * under a confusingly-duplicated name.
+ */
 export async function createSavedLine(input: {
   id: string;
   teamId: string;
   name: string;
   playerIds: string[];
 }): Promise<SavedLine> {
+  const existing = await db
+    .select()
+    .from(savedLines)
+    .where(eq(savedLines.teamId, input.teamId));
+  const match = existing.find(
+    (l) => normalizeLineName(l.name) === normalizeLineName(input.name),
+  );
+
+  if (match) {
+    if (samePersonnel(match.playerIds, input.playerIds)) {
+      return toSavedLine(match);
+    }
+    const [row] = await db
+      .update(savedLines)
+      .set({ playerIds: input.playerIds })
+      .where(eq(savedLines.id, match.id))
+      .returning();
+    return toSavedLine(row!);
+  }
+
   const [row] = await db
     .insert(savedLines)
     .values({
@@ -347,10 +385,39 @@ export async function createSavedLine(input: {
   return toSavedLine(row!);
 }
 
+/**
+ * Same merge policy as createSavedLine, applied to edits: renaming (or
+ * re-composing) a line/pod into collision with a *different* existing one
+ * under the same name is resolved the same way instead of leaving two rows
+ * with the same name side by side — identical personnel merges into one
+ * (this row is dropped, the other survives); different personnel means this
+ * edit is the newer definition, so the other, now-stale row is superseded.
+ */
 export async function updateSavedLine(
   id: string,
   patch: { name?: string; playerIds?: string[] },
 ): Promise<SavedLine | null> {
+  const [existing] = await db.select().from(savedLines).where(eq(savedLines.id, id));
+  if (!existing) return null;
+
+  if (patch.name !== undefined) {
+    const nextPlayerIds = patch.playerIds ?? existing.playerIds;
+    const teamLines = await db
+      .select()
+      .from(savedLines)
+      .where(eq(savedLines.teamId, existing.teamId));
+    const collision = teamLines.find(
+      (l) => l.id !== id && normalizeLineName(l.name) === normalizeLineName(patch.name!),
+    );
+    if (collision) {
+      if (samePersonnel(collision.playerIds, nextPlayerIds)) {
+        await db.delete(savedLines).where(eq(savedLines.id, id));
+        return toSavedLine(collision);
+      }
+      await db.delete(savedLines).where(eq(savedLines.id, collision.id));
+    }
+  }
+
   const [row] = await db
     .update(savedLines)
     .set(patch)
