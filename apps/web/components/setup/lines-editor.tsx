@@ -55,6 +55,18 @@ export function LinesEditor({ tournamentId }: { tournamentId: string }) {
 
   const byId = useMemo(() => new Map(players.map((p) => [p.id, p])), [players]);
 
+  // Grouped by color (in the same canonical order as the swatch picker,
+  // uncolored lines last), then alphabetically by name within a color.
+  const sortedLines = useMemo(() => {
+    const colorRank = (c: LineColor | undefined) =>
+      c ? LINE_COLORS.indexOf(c) : LINE_COLORS.length;
+    return [...lines].sort(
+      (a, b) =>
+        colorRank(a.color) - colorRank(b.color) ||
+        a.name.localeCompare(b.name),
+    );
+  }, [lines]);
+
   if (tournament === undefined) return <p className="text-muted">Loading…</p>;
   if (tournament === null) {
     return (
@@ -102,6 +114,9 @@ export function LinesEditor({ tournamentId }: { tournamentId: string }) {
     setColor(line.color ?? null);
     setSide(line.side ?? "both");
     setEditingId(line.id);
+    document
+      .getElementById("line-builder")
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
   const save = async () => {
@@ -149,7 +164,7 @@ export function LinesEditor({ tournamentId }: { tournamentId: string }) {
       </div>
 
       {/* Builder */}
-      <div className="space-y-3 rounded-lg border border-line-strong p-3">
+      <div id="line-builder" className="space-y-3 rounded-lg border border-line-strong p-3">
         <div className="flex items-center justify-between">
           <p className="text-sm font-medium">
             {editingId ? "Editing" : "New"}{" "}
@@ -255,7 +270,7 @@ export function LinesEditor({ tournamentId }: { tournamentId: string }) {
           <p className="text-sm text-muted">No saved lines or pods yet.</p>
         ) : (
           <ul className="space-y-2">
-            {lines.map((line) => {
+            {sortedLines.map((line) => {
               const c = composition(line.playerIds);
               const isPod = line.playerIds.length < 7;
               const names = line.playerIds
