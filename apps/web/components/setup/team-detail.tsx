@@ -26,7 +26,11 @@ import {
   createTournament,
   readTournaments,
 } from "@/lib/storage/tournaments";
-import { updateGameMetadata, type GameMetadataPatch } from "@/lib/storage/games";
+import {
+  deleteGame,
+  updateGameMetadata,
+  type GameMetadataPatch,
+} from "@/lib/storage/games";
 import { Modal } from "@/components/modal";
 import {
   ROLE_BADGE_COLOR,
@@ -694,6 +698,21 @@ export function GameList({
   const [list, setList] = useState(games);
   useEffect(() => setList(games), [games]);
   const [editing, setEditing] = useState<Game | null>(null);
+  const [deleting, setDeleting] = useState<Game | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const confirmDelete = () => {
+    if (!deleting) return;
+    deleteGame(deleting.id)
+      .then(() => {
+        setList((cur) => cur.filter((g) => g.id !== deleting.id));
+        setDeleting(null);
+        setDeleteError(null);
+      })
+      .catch((err) => {
+        setDeleteError(err instanceof Error ? err.message : String(err));
+      });
+  };
 
   if (list.length === 0) {
     return <p className="text-sm text-muted">{emptyLabel}</p>;
@@ -712,6 +731,17 @@ export function GameList({
                 <span>
                   {statusLabel[g.status]} · cap {g.gameCap}
                 </span>
+                {g.status === "in_progress" && g.currentScore && (
+                  <span className="font-semibold tabular-nums text-fg">
+                    {g.currentScore.our}–{g.currentScore.their}
+                    {g.currentPointNumber !== undefined && (
+                      <span className="font-normal text-faint">
+                        {" "}
+                        · Point {g.currentPointNumber}
+                      </span>
+                    )}
+                  </span>
+                )}
                 {g.status !== "scheduled" && (
                   <span
                     className={`rounded px-1.5 py-0.5 text-[10px] font-semibold text-white ${
@@ -735,6 +765,14 @@ export function GameList({
               >
                 <EditIcon />
               </button>
+              <button
+                onClick={() => setDeleting(g)}
+                aria-label={`Delete game vs ${g.opponentName}`}
+                title="Delete game"
+                className="text-faint hover:text-red-600 dark:text-red-400"
+              >
+                ×
+              </button>
               <Link
                 href={`/games/${g.id}`}
                 className="rounded-md border border-line-strong px-2.5 py-1 font-medium hover:bg-surface-2"
@@ -757,6 +795,40 @@ export function GameList({
             setEditing(null);
           }}
         />
+      )}
+
+      {deleting && (
+        <Modal
+          onClose={() => {
+            setDeleting(null);
+            setDeleteError(null);
+          }}
+        >
+          <h2 className="font-medium">Delete game?</h2>
+          <p className="text-sm text-muted">
+            Delete the game vs {deleting.opponentName}? This can’t be undone.
+          </p>
+          {deleteError && (
+            <p className="text-xs text-red-600 dark:text-red-400">{deleteError}</p>
+          )}
+          <div className="flex justify-end gap-2 pt-1">
+            <button
+              onClick={() => {
+                setDeleting(null);
+                setDeleteError(null);
+              }}
+              className="rounded-md border border-line-strong px-3 py-1.5 text-sm"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={confirmDelete}
+              className="rounded bg-red-600 px-3 py-1.5 text-sm font-medium text-white"
+            >
+              Delete
+            </button>
+          </div>
+        </Modal>
       )}
     </>
   );

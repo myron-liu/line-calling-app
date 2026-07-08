@@ -150,6 +150,17 @@ export interface Game {
    * apps/server/src/db/queries.ts's syncGame.
    */
   version: number;
+
+  /**
+   * Read-only summary of the live point log, attached only by the
+   * team/tournament game-list endpoints and only while `status` is
+   * "in_progress" (derived server-side from the same point log the client
+   * itself would derive from — see apps/server/src/db/queries.ts's
+   * attachLiveScore). Not part of the persisted row, and never sent on
+   * create/update/sync responses.
+   */
+  currentScore?: { our: number; their: number };
+  currentPointNumber?: number;
 }
 
 export interface Substitution {

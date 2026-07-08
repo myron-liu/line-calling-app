@@ -1,9 +1,13 @@
 // Data-access layer. Thin wrappers around Drizzle — no business rules live here
 // (those stay in @shared/game-rules, run client-side before a sync ever reaches
 // this file). IDs are always client-supplied so every insert can double as an
-// idempotent upsert.
+// idempotent upsert. The one exception is attachLiveScore below: a read-only
+// summary (current score/point number) computed from data the client already
+// wrote, for display on the team/tournament game lists — it never feeds back
+// into a mutation or decides anything about the game's own state.
 
 import { and, eq } from "drizzle-orm";
+import { deriveLiveGameState } from "@shared/game-rules";
 import type {
   Division,
   Game,
@@ -718,7 +722,7 @@ export async function updateGameMetadata(
 
 export async function listTeamGames(teamId: string): Promise<Game[]> {
   const rows = await db.select().from(games).where(eq(games.teamId, teamId));
-  return rows.map(toGame);
+  return Promise.all(rows.map(attachLiveScore));
 }
 
 export async function listTournamentGames(
@@ -728,7 +732,25 @@ export async function listTournamentGames(
     .select()
     .from(games)
     .where(eq(games.tournamentId, tournamentId));
-  return rows.map(toGame);
+  return Promise.all(rows.map(attachLiveScore));
+}
+
+/** Attaches Game.currentScore/currentPointNumber for an in_progress game (see
+ *  the comment on that field in types.ts) — a no-op for any other status. */
+async function attachLiveScore(row: typeof games.$inferSelect): Promise<Game> {
+  const game = toGame(row);
+  if (row.status !== "in_progress") return game;
+  const pointRows = await db
+    .select()
+    .from(points)
+    .where(eq(points.gameId, row.id))
+    .orderBy(points.pointNumber);
+  const live = deriveLiveGameState(game, pointRows.map(toPoint), toMeta(row));
+  return {
+    ...game,
+    currentScore: { our: live.ourScore, their: live.theirScore },
+    currentPointNumber: live.currentPointNumber,
+  };
 }
 
 export async function getGameFull(gameId: string): Promise<GameFull | null> {

@@ -9,6 +9,7 @@ import { halfScoreForCap } from "@shared/game-rules";
 import { api } from "../api/client";
 import {
   registerGame,
+  unregisterGame,
   writeGameConfig,
   writeLastSyncedAt,
   writeLog,
@@ -130,4 +131,13 @@ export async function updateGameMetadata(
   const game = await api.patch<Game>(`/games/${gameId}/metadata`, patch);
   writeGameConfig(game);
   return game;
+}
+
+// ── Delete ───────────────────────────────────────────────────────────────────
+
+/** Permanently deletes a game. Also drops it from this device's local
+ *  live-game switcher/cache, in case it was ever opened here. */
+export async function deleteGame(gameId: string): Promise<void> {
+  await api.delete(`/games/${gameId}`);
+  unregisterGame(gameId);
 }
