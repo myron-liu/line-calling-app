@@ -2,7 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import type { Player, SavedLine, Tournament } from "@shared/game-rules";
+import type {
+  LineColor,
+  ODPreference,
+  Player,
+  SavedLine,
+  Tournament,
+} from "@shared/game-rules";
 import { readPlayers } from "@/lib/storage/teams";
 import { findTournament } from "@/lib/storage/tournaments";
 import {
@@ -11,7 +17,15 @@ import {
   readSavedLines,
   updateSavedLine,
 } from "@/lib/storage/savedLines";
-import { displayName, odTag, roleTag, sortRoster } from "@/lib/player-display";
+import {
+  LINE_COLOR_SWATCH,
+  LINE_COLORS,
+  displayName,
+  odTag,
+  roleTag,
+  sortRoster,
+} from "@/lib/player-display";
+import { Modal } from "@/components/modal";
 
 // Build/edit reusable lines (7) and pods (1-6) for a team, reached from the
 // tournament page. Saved lines are team-scoped (§4.3) so they show up in the
@@ -25,7 +39,10 @@ export function LinesEditor({ tournamentId }: { tournamentId: string }) {
 
   const [selected, setSelected] = useState<string[]>([]);
   const [name, setName] = useState("");
+  const [color, setColor] = useState<LineColor | null>(null);
+  const [side, setSide] = useState<ODPreference>("both");
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<SavedLine | null>(null);
 
   useEffect(() => {
     findTournament(tournamentId).then((t) => {
@@ -74,27 +91,39 @@ export function LinesEditor({ tournamentId }: { tournamentId: string }) {
   const resetBuilder = () => {
     setSelected([]);
     setName("");
+    setColor(null);
+    setSide("both");
     setEditingId(null);
   };
 
   const startEdit = (line: SavedLine) => {
     setSelected([...line.playerIds]);
     setName(line.name);
+    setColor(line.color ?? null);
+    setSide(line.side ?? "both");
     setEditingId(line.id);
   };
 
   const save = async () => {
     if (!name.trim() || selected.length === 0) return;
     if (editingId) {
-      await updateSavedLine(editingId, { name: name.trim(), playerIds: selected });
+      await updateSavedLine(editingId, {
+        name: name.trim(),
+        playerIds: selected,
+        color,
+        side,
+      });
     } else {
-      await createSavedLine(teamId, name.trim(), selected);
+      await createSavedLine(teamId, name.trim(), selected, { color, side });
     }
     refresh();
     resetBuilder();
   };
 
-  const remove = async (id: string) => {
+  const confirmRemove = async () => {
+    if (!deleting) return;
+    const id = deleting.id;
+    setDeleting(null);
     await deleteSavedLine(id);
     if (editingId === id) resetBuilder();
     refresh();
@@ -144,6 +173,42 @@ export function LinesEditor({ tournamentId }: { tournamentId: string }) {
           placeholder={selected.length === 7 ? "Line name (e.g. O-line)" : "Pod name (e.g. Handler core)"}
           className="w-full rounded border border-line-strong px-2 py-1.5 text-sm"
         />
+
+        <div className="flex flex-wrap items-center gap-4 text-sm">
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-faint">Color</span>
+            <button
+              onClick={() => setColor(null)}
+              aria-label="No color"
+              aria-pressed={color === null}
+              className={`h-5 w-5 rounded-full border-2 border-dashed ${
+                color === null ? "border-fg" : "border-line-strong"
+              }`}
+            />
+            {LINE_COLORS.map((c) => (
+              <button
+                key={c}
+                onClick={() => setColor(c)}
+                aria-label={c}
+                aria-pressed={color === c}
+                className={`h-5 w-5 rounded-full ${LINE_COLOR_SWATCH[c]} ${
+                  color === c ? "ring-2 ring-offset-1 ring-offset-surface ring-fg" : ""
+                }`}
+              />
+            ))}
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-faint">Side</span>
+            {(["O", "D", "both"] as const).map((s) => (
+              <ToggleButton
+                key={s}
+                label={s === "both" ? "O/D" : s}
+                active={side === s}
+                onClick={() => setSide(s)}
+              />
+            ))}
+          </div>
+        </div>
 
         {players.length === 0 ? (
           <p className="text-sm text-muted">No players on the team roster yet.</p>
@@ -207,11 +272,17 @@ export function LinesEditor({ tournamentId }: { tournamentId: string }) {
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="font-medium">
+                    <span className="flex items-center gap-1.5 font-medium">
+                      {line.color && (
+                        <span
+                          className={`h-2.5 w-2.5 shrink-0 rounded-full ${LINE_COLOR_SWATCH[line.color]}`}
+                          aria-hidden
+                        />
+                      )}
                       {line.name}{" "}
                       <span className="text-xs font-normal text-faint">
-                        {isPod ? "pod" : "line"} · {c.mmp}M/{c.wmp}W · used{" "}
-                        {line.useCount ?? 0}×
+                        {isPod ? "pod" : "line"} · {odTag(line.side)} · {c.mmp}M/
+                        {c.wmp}W · used {line.useCount ?? 0}×
                       </span>
                     </span>
                     <div className="flex gap-2">
@@ -222,7 +293,7 @@ export function LinesEditor({ tournamentId }: { tournamentId: string }) {
                         Edit
                       </button>
                       <button
-                        onClick={() => remove(line.id)}
+                        onClick={() => setDeleting(line)}
                         className="text-xs font-medium text-red-600 dark:text-red-400"
                       >
                         Delete
@@ -236,7 +307,57 @@ export function LinesEditor({ tournamentId }: { tournamentId: string }) {
           </ul>
         )}
       </div>
+
+      {deleting && (
+        <Modal onClose={() => setDeleting(null)}>
+          <h2 className="font-medium">
+            Delete {deleting.playerIds.length < 7 ? "pod" : "line"}?
+          </h2>
+          <p className="text-sm text-muted">
+            Are you sure you want to delete “{deleting.name}”? This can’t be
+            undone.
+          </p>
+          <div className="flex justify-end gap-2 pt-1">
+            <button
+              onClick={() => setDeleting(null)}
+              className="rounded-md border border-line-strong px-3 py-1.5 text-sm"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={confirmRemove}
+              className="rounded bg-red-600 px-3 py-1.5 text-sm font-medium text-white"
+            >
+              Delete
+            </button>
+          </div>
+        </Modal>
+      )}
     </section>
+  );
+}
+
+function ToggleButton({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      aria-pressed={active}
+      className={`rounded-full border px-2 py-0.5 text-xs ${
+        active
+          ? "border-emerald-500 bg-emerald-50 font-medium text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300"
+          : "border-line-strong text-faint"
+      }`}
+    >
+      {label}
+    </button>
   );
 }
 

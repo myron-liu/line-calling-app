@@ -83,6 +83,8 @@ export const savedLines = pgTable("saved_lines", {
   name: text("name").notNull(),
   playerIds: jsonb("player_ids").notNull().$type<string[]>(),
   useCount: integer("use_count").notNull().default(0),
+  color: text("color"), // "red" | "green" | "blue" | "yellow" | "black" | "purple" | null
+  side: text("side"), // "O" | "D" | "both" | null
   createdAt: createdAt(),
 });
 
@@ -103,8 +105,21 @@ export const games = pgTable("games", {
   halfScore: integer("half_score").notNull(),
   timeoutsPerHalf: integer("timeouts_per_half").notNull(),
   startingGenderRatio: text("starting_gender_ratio"), // "4MMP_3WMP" | "4WMP_3MMP" | null
-  startingOD: text("starting_od").notNull(), // "O" | "D"
+  // "O" | "D" — a real value once in_progress; while status is "scheduled"
+  // this holds an unread placeholder until the flip-result form resolves it
+  // (see queries.ts's createGame / resolveFlip).
+  startingOD: text("starting_od").notNull(),
   status: text("status").notNull().default("in_progress"),
+
+  // Administrative details, all optional (§ create-game-form).
+  fieldNumber: text("field_number"),
+  gameDate: text("game_date"), // ISO date, kept as text to match Tournament
+  startTime: text("start_time"),
+  opposingCoachName: text("opposing_coach_name"),
+  // Resolved by the post-creation flip-result step, not asked upfront, since
+  // they're only known after the actual disc flip — null until then.
+  fieldSide: text("field_side"), // "left" | "right" | null
+  teamColor: text("team_color"), // "light" | "dark" | null
 
   // Optimistic-concurrency counter for PUT /games/:id/sync — see syncGame.
   version: integer("version").notNull().default(1),

@@ -81,14 +81,26 @@ export interface TournamentRoster {
   createdAt: string;
 }
 
+/** Coach-assigned color for a saved line/pod chip in the quick-lines bar. */
+export type LineColor = "red" | "green" | "blue" | "yellow" | "black" | "purple";
+
 export interface SavedLine {
   id: string;
   teamId: string;
   name: string;
   /** 1..7 players (a full line or a partial pod). */
   playerIds: string[];
-  /** Times this line/pod has been applied in a live game. Undefined = 0. */
+  /** Times this line/pod has actually been played (a confirmed point's final
+   *  lineup was a superset of it) — not incremented merely by tapping it
+   *  during line-building, since the selection can still change before
+   *  confirming. Undefined = 0. */
   useCount?: number;
+  /** Optional coach-assigned color for the quick-lines chip. Unset = default
+   *  line/pod coloring. */
+  color?: LineColor;
+  /** Which side this line/pod is meant for; unset/"both" means it shows up
+   *  for either. Drives quick-lines sort order (current side's pods first). */
+  side?: ODPreference;
   createdAt: string;
 }
 
@@ -105,8 +117,29 @@ export interface Game {
 
   /** Mixed only. Null/ignored for Open & Women. */
   startingGenderRatio?: GenderRatio;
-  /** O or D for the very first point of the game. */
+  /**
+   * O or D for the very first point of the game. While `status` is
+   * "scheduled" this is an unread placeholder — the real value is set by
+   * the post-creation flip-result step, which flips status to "in_progress".
+   */
   startingOD: OD;
+
+  /** Optional, filled in at creation time. */
+  fieldNumber?: string;
+  /** ISO date (YYYY-MM-DD). For a tournament game, constrained to the
+   *  tournament's startDate–endDate range by the creation form. */
+  gameDate?: string;
+  startTime?: string;
+  opposingCoachName?: string;
+
+  /**
+   * Decided at the coin flip, after creation — unset while `status` is
+   * "scheduled". "left"/"right" is relative to home, i.e. where your team's
+   * sideline stuff is.
+   */
+  fieldSide?: "left" | "right";
+  /** Decided at the coin flip, after creation — unset while `status` is "scheduled". */
+  teamColor?: "light" | "dark";
 
   status: GameStatus;
   createdAt: string;

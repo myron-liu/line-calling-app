@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import type {
+  Division,
   GameStatus,
   GenderMatch,
   Game,
@@ -25,6 +26,7 @@ import {
   createTournament,
   readTournaments,
 } from "@/lib/storage/tournaments";
+import { updateGameMetadata, type GameMetadataPatch } from "@/lib/storage/games";
 import { Modal } from "@/components/modal";
 import { displayName, odTag, roleTag, sortRoster } from "@/lib/player-display";
 import { sameById, sameJson, useCachedFetch } from "@/lib/cache";
@@ -71,13 +73,18 @@ export function TeamDetail({ teamId }: { teamId: string }) {
         </span>
       </div>
 
-      <Roster teamId={teamId} players={players} onChange={refresh} />
+      <Roster
+        teamId={teamId}
+        division={team.division}
+        players={players}
+        onChange={refresh}
+      />
 
       <Tournaments
         team={team}
         tournaments={tournaments}
-        onCreate={async (name, date) => {
-          await createTournament(teamId, name, team.division, date);
+        onCreate={async (name, startDate, endDate) => {
+          await createTournament(teamId, name, team.division, startDate, endDate);
           await refresh();
         }}
       />
@@ -89,10 +96,12 @@ export function TeamDetail({ teamId }: { teamId: string }) {
 
 function Roster({
   teamId,
+  division,
   players,
   onChange,
 }: {
   teamId: string;
+  division: Division;
   players: Player[];
   onChange: () => void;
 }) {
@@ -103,7 +112,34 @@ function Roster({
   const [odPreference, setOdPreference] = useState<ODPreference>("both");
   const [jersey, setJersey] = useState("");
   const [editing, setEditing] = useState<Player | null>(null);
+  const [deleting, setDeleting] = useState<Player | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [roleFilter, setRoleFilter] = useState<"all" | "handler" | "cutter">("all");
+  const [odFilter, setOdFilter] = useState<"all" | "O" | "D">("all");
+
+  const confirmDelete = () => {
+    if (!deleting) return;
+    deletePlayer(deleting.id)
+      .then(() => {
+        setDeleting(null);
+        onChange();
+      })
+      .catch((err) => {
+        setDeleting(null);
+        setError(err instanceof Error ? err.message : String(err));
+      });
+  };
+
+  const matchesFilters = (p: Player) => {
+    if (roleFilter === "handler" && p.role === "cutter") return false;
+    if (roleFilter === "cutter" && p.role === "handler") return false;
+    if (odFilter === "O" && p.odPreference === "D") return false;
+    if (odFilter === "D" && p.odPreference === "O") return false;
+    return true;
+  };
+  const filtered = players.filter(matchesFilters);
+  const mmpPlayers = sortRoster(filtered.filter((p) => p.genderMatch === "MMP"));
+  const wmpPlayers = sortRoster(filtered.filter((p) => p.genderMatch === "WMP"));
 
   const conflict = name.trim() ? playerConflict(players, { name, nickname }) : null;
 
@@ -135,47 +171,50 @@ function Roster({
       </h2>
 
       {players.length === 0 ? (
-        <p className="text-sm text-muted">No players yet.</p>
+        <div className="space-y-1 text-sm text-muted">
+          <p>No players yet.</p>
+          <p>
+            {division === "mixed"
+              ? "Add at least 4 MMP players and 4 WMP players to form a mixed team that can compete in tournaments."
+              : "Add at least 7 players to form a team that can compete in tournaments."}
+          </p>
+        </div>
       ) : (
-        <ul className="grid grid-cols-2 gap-1.5">
-          {sortRoster(players).map((p) => (
-            <li
-              key={p.id}
-              className={`flex items-center gap-1 rounded-md border px-2 py-1.5 text-[13px] ${
-                p.genderMatch === "MMP" ? "border-sky-200 dark:border-sky-500/30" : "border-rose-200 dark:border-rose-500/30"
-              }`}
-            >
-              <button
-                onClick={() => setEditing(p)}
-                className="flex min-w-0 flex-1 items-center gap-1 text-left hover:opacity-80"
-              >
-                <span
-                  className={`shrink-0 ${
-                    p.genderMatch === "MMP" ? "text-sky-600 dark:text-sky-400" : "text-rose-600 dark:text-rose-400"
-                  }`}
-                >
-                  {p.genderMatch}
-                </span>
-                <span className="min-w-0 flex-1 truncate">{displayName(p)}</span>
-                <span className="shrink-0 text-[10px] text-faint">{roleTag(p.role)}</span>
-                <span className="shrink-0 text-[10px] text-faint">{odTag(p.odPreference)}</span>
-              </button>
-              <button
-                onClick={() => {
-                  deletePlayer(p.id)
-                    .then(onChange)
-                    .catch((err) =>
-                      setError(err instanceof Error ? err.message : String(err)),
-                    );
-                }}
-                aria-label={`Remove ${p.name}`}
-                className="shrink-0 text-faint hover:text-red-600 dark:text-red-400"
-              >
-                ×
-              </button>
-            </li>
-          ))}
-        </ul>
+        <>
+          <div className="flex flex-wrap items-center gap-1.5 text-xs">
+            <span className="text-faint">Role:</span>
+            <FilterChip label="All" active={roleFilter === "all"} onClick={() => setRoleFilter("all")} />
+            <FilterChip
+              label="Handlers"
+              active={roleFilter === "handler"}
+              onClick={() => setRoleFilter("handler")}
+            />
+            <FilterChip
+              label="Cutters"
+              active={roleFilter === "cutter"}
+              onClick={() => setRoleFilter("cutter")}
+            />
+            <span className="ml-2 text-faint">Line:</span>
+            <FilterChip label="All" active={odFilter === "all"} onClick={() => setOdFilter("all")} />
+            <FilterChip label="O" active={odFilter === "O"} onClick={() => setOdFilter("O")} />
+            <FilterChip label="D" active={odFilter === "D"} onClick={() => setOdFilter("D")} />
+          </div>
+
+          <RosterAccordion
+            label="MMP"
+            tone="sky"
+            players={mmpPlayers}
+            onEdit={setEditing}
+            onDelete={setDeleting}
+          />
+          <RosterAccordion
+            label="WMP"
+            tone="rose"
+            players={wmpPlayers}
+            onEdit={setEditing}
+            onDelete={setDeleting}
+          />
+        </>
       )}
 
       <div className="flex flex-wrap items-end gap-2 rounded-lg border border-dashed border-line-strong p-3 text-sm">
@@ -250,7 +289,157 @@ function Roster({
           }}
         />
       )}
+
+      {deleting && (
+        <Modal onClose={() => setDeleting(null)}>
+          <h2 className="font-medium">Remove player?</h2>
+          <p className="text-sm text-muted">
+            Remove {displayName(deleting)} from the roster? This can’t be undone.
+          </p>
+          <div className="flex justify-end gap-2 pt-1">
+            <button
+              onClick={() => setDeleting(null)}
+              className="rounded-md border border-line-strong px-3 py-1.5 text-sm"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={confirmDelete}
+              className="rounded bg-red-600 px-3 py-1.5 text-sm font-medium text-white"
+            >
+              Remove
+            </button>
+          </div>
+        </Modal>
+      )}
     </div>
+  );
+}
+
+function FilterChip({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      aria-pressed={active}
+      className={`rounded-full border px-2 py-0.5 ${
+        active
+          ? "border-emerald-500 bg-emerald-50 font-medium text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300"
+          : "border-line-strong text-faint"
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
+const ROSTER_TONE = {
+  sky: {
+    border: "border-sky-200 dark:border-sky-500/30",
+    text: "text-sky-600 dark:text-sky-400",
+  },
+  rose: {
+    border: "border-rose-200 dark:border-rose-500/30",
+    text: "text-rose-600 dark:text-rose-400",
+  },
+} as const;
+
+function RosterAccordion({
+  label,
+  tone,
+  players,
+  onEdit,
+  onDelete,
+}: {
+  label: string;
+  tone: keyof typeof ROSTER_TONE;
+  players: Player[];
+  onEdit: (p: Player) => void;
+  onDelete: (p: Player) => void;
+}) {
+  const t = ROSTER_TONE[tone];
+  return (
+    <details open className={`rounded-lg border p-2 ${t.border}`}>
+      <summary className={`cursor-pointer text-sm font-semibold ${t.text}`}>
+        {label} <span className="font-normal text-faint">({players.length})</span>
+      </summary>
+      <ul className="mt-2 grid grid-cols-2 gap-1.5">
+        {players.length === 0 ? (
+          <li className="col-span-2 text-[13px] text-faint">
+            No players match the current filters.
+          </li>
+        ) : (
+          players.map((p) => (
+            <RosterRow key={p.id} p={p} tone={t} onEdit={onEdit} onDelete={onDelete} />
+          ))
+        )}
+      </ul>
+    </details>
+  );
+}
+
+function RosterRow({
+  p,
+  tone,
+  onEdit,
+  onDelete,
+}: {
+  p: Player;
+  tone: (typeof ROSTER_TONE)[keyof typeof ROSTER_TONE];
+  onEdit: (p: Player) => void;
+  onDelete: (p: Player) => void;
+}) {
+  return (
+    <li className={`flex items-center gap-1 rounded-md border px-2 py-1.5 text-[13px] ${tone.border}`}>
+      <span className="flex min-w-0 flex-1 items-center gap-1">
+        <span className={`shrink-0 ${tone.text}`}>{p.genderMatch}</span>
+        <span className="min-w-0 flex-1 truncate">{displayName(p)}</span>
+        <span className="shrink-0 text-[10px] text-faint">{roleTag(p.role)}</span>
+        <span className="shrink-0 text-[10px] text-faint">{odTag(p.odPreference)}</span>
+      </span>
+      <button
+        onClick={() => onEdit(p)}
+        aria-label={`Edit ${p.name}`}
+        title="Edit player"
+        className="shrink-0 text-faint hover:text-fg"
+      >
+        <EditIcon />
+      </button>
+      <button
+        onClick={() => onDelete(p)}
+        aria-label={`Remove ${p.name}`}
+        className="shrink-0 text-faint hover:text-red-600 dark:text-red-400"
+      >
+        ×
+      </button>
+    </li>
+  );
+}
+
+// Small pencil icon — no icon library dependency, just an inline SVG.
+function EditIcon() {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      className="h-3.5 w-3.5"
+      aria-hidden
+    >
+      <path
+        d="M13.5 3.5l3 3L7 16l-4 1 1-4 9.5-9.5z"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }
 
@@ -389,10 +578,13 @@ function Tournaments({
 }: {
   team: Team;
   tournaments: Tournament[];
-  onCreate: (name: string, date: string) => void;
+  onCreate: (name: string, startDate: string, endDate?: string) => void;
 }) {
   const [name, setName] = useState("");
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [startDate, setStartDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [endDate, setEndDate] = useState("");
+
+  const endDateInvalid = endDate !== "" && endDate < startDate;
 
   return (
     <div className="space-y-3">
@@ -402,19 +594,29 @@ function Tournaments({
       ) : (
         <ul className="space-y-2">
           {tournaments.map((t) => (
-            <li key={t.id}>
+            <li
+              key={t.id}
+              className="flex items-center justify-between gap-2 rounded-lg border border-line px-4 py-3"
+            >
+              <div className="min-w-0">
+                <p className="truncate font-medium">{t.name}</p>
+                <p className="text-xs text-faint">
+                  {t.endDate && t.endDate !== t.startDate
+                    ? `${t.startDate} – ${t.endDate}`
+                    : t.startDate}
+                </p>
+              </div>
               <Link
                 href={`/tournaments/${t.id}`}
-                className="flex items-center justify-between rounded-lg border border-line px-4 py-3 hover:bg-surface-2"
+                className="shrink-0 rounded-md border border-line-strong px-3 py-1.5 text-sm font-medium text-emerald-700 hover:bg-surface-2 dark:text-emerald-400"
               >
-                <span className="font-medium">{t.name}</span>
-                <span className="text-xs text-faint">{t.startDate}</span>
+                View tournament →
               </Link>
             </li>
           ))}
         </ul>
       )}
-      <div className="flex flex-wrap gap-2 rounded-lg border border-dashed border-line-strong p-3 text-sm">
+      <div className="flex flex-wrap items-start gap-2 rounded-lg border border-dashed border-line-strong p-3 text-sm">
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -423,22 +625,39 @@ function Tournaments({
         />
         <input
           type="date"
-          value={date}
-          onChange={(e) => setDate(e.target.value)}
+          value={startDate}
+          onChange={(e) => {
+            setStartDate(e.target.value);
+            if (endDate && endDate < e.target.value) setEndDate(e.target.value);
+          }}
+          className="h-9 rounded border border-line-strong px-2"
+        />
+        <input
+          type="date"
+          value={endDate}
+          min={startDate}
+          onChange={(e) => setEndDate(e.target.value)}
+          placeholder="End date"
           className="h-9 rounded border border-line-strong px-2"
         />
         <button
           onClick={() => {
-            if (!name.trim()) return;
-            onCreate(name.trim(), date);
+            if (!name.trim() || endDateInvalid) return;
+            onCreate(name.trim(), startDate, endDate || undefined);
             setName("");
+            setEndDate("");
           }}
-          disabled={!name.trim()}
+          disabled={!name.trim() || endDateInvalid}
           className="h-9 rounded bg-emerald-600 px-3 font-medium text-white disabled:bg-disabled"
         >
           Create
         </button>
       </div>
+      {endDateInvalid && (
+        <p className="text-xs text-red-600 dark:text-red-400">
+          End date can&rsquo;t be before the start date.
+        </p>
+      )}
     </div>
   );
 }
@@ -454,28 +673,203 @@ const statusLabel: Record<GameStatus, string> = {
 export function GameList({
   games,
   emptyLabel,
+  tournamentStartDate,
+  tournamentEndDate,
 }: {
   games: Game[];
   emptyLabel: string;
+  /** Constrains the edit modal's game-date picker, for a tournament game. */
+  tournamentStartDate?: string;
+  tournamentEndDate?: string;
 }) {
-  if (games.length === 0) {
+  const [list, setList] = useState(games);
+  useEffect(() => setList(games), [games]);
+  const [editing, setEditing] = useState<Game | null>(null);
+
+  if (list.length === 0) {
     return <p className="text-sm text-muted">{emptyLabel}</p>;
   }
   return (
-    <ul className="space-y-2">
-      {games.map((g) => (
-        <li key={g.id}>
-          <Link
-            href={`/games/${g.id}`}
-            className="flex items-center justify-between rounded-lg border border-line px-4 py-3 hover:bg-surface-2"
+    <>
+      <ul className="space-y-2">
+        {list.map((g) => (
+          <li
+            key={g.id}
+            className="flex items-center justify-between gap-2 rounded-lg border border-line px-4 py-3"
           >
-            <span className="font-medium">vs {g.opponentName}</span>
-            <span className="text-xs text-faint">
-              {statusLabel[g.status]} · cap {g.gameCap}
-            </span>
-          </Link>
-        </li>
-      ))}
-    </ul>
+            <div className="min-w-0">
+              <p className="truncate font-medium">vs {g.opponentName}</p>
+              <p className="flex flex-wrap items-center gap-1.5 text-xs text-faint">
+                <span>
+                  {statusLabel[g.status]} · cap {g.gameCap}
+                </span>
+                {g.status !== "scheduled" && (
+                  <span
+                    className={`rounded px-1.5 py-0.5 text-[10px] font-semibold text-white ${
+                      g.startingOD === "O" ? "bg-sky-600" : "bg-orange-600"
+                    }`}
+                  >
+                    Started {g.startingOD}
+                  </span>
+                )}
+                {g.fieldSide && (
+                  <span>{g.fieldSide === "left" ? "Left" : "Right"} side</span>
+                )}
+              </p>
+            </div>
+            <div className="flex shrink-0 items-center gap-2 text-sm">
+              <button
+                onClick={() => setEditing(g)}
+                aria-label={`Edit game vs ${g.opponentName}`}
+                title="Edit game"
+                className="text-faint hover:text-fg"
+              >
+                <EditIcon />
+              </button>
+              <Link
+                href={`/games/${g.id}`}
+                className="rounded-md border border-line-strong px-2.5 py-1 font-medium hover:bg-surface-2"
+              >
+                View game →
+              </Link>
+            </div>
+          </li>
+        ))}
+      </ul>
+
+      {editing && (
+        <EditGameModal
+          game={editing}
+          tournamentStartDate={tournamentStartDate}
+          tournamentEndDate={tournamentEndDate}
+          onClose={() => setEditing(null)}
+          onSaved={(updated) => {
+            setList((cur) => cur.map((g) => (g.id === updated.id ? updated : g)));
+            setEditing(null);
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+function EditGameModal({
+  game,
+  tournamentStartDate,
+  tournamentEndDate,
+  onClose,
+  onSaved,
+}: {
+  game: Game;
+  tournamentStartDate?: string;
+  tournamentEndDate?: string;
+  onClose: () => void;
+  onSaved: (game: Game) => void;
+}) {
+  const [opponentName, setOpponentName] = useState(game.opponentName);
+  const [fieldNumber, setFieldNumber] = useState(game.fieldNumber ?? "");
+  const [gameDate, setGameDate] = useState(game.gameDate ?? "");
+  const [startTime, setStartTime] = useState(game.startTime ?? "");
+  const [opposingCoachName, setOpposingCoachName] = useState(game.opposingCoachName ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const gameDateInvalid =
+    gameDate !== "" &&
+    ((tournamentStartDate !== undefined && gameDate < tournamentStartDate) ||
+      (tournamentEndDate !== undefined && gameDate > tournamentEndDate));
+
+  const save = async () => {
+    if (!opponentName.trim() || gameDateInvalid) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const patch: GameMetadataPatch = {
+        opponentName: opponentName.trim(),
+        fieldNumber: fieldNumber.trim() || null,
+        gameDate: gameDate || null,
+        startTime: startTime.trim() || null,
+        opposingCoachName: opposingCoachName.trim() || null,
+      };
+      const updated = await updateGameMetadata(game.id, patch);
+      onSaved(updated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal onClose={onClose}>
+      <h2 className="font-medium">Edit game</h2>
+      <div className="grid grid-cols-2 gap-3 text-sm">
+        <label className="col-span-2 flex flex-col gap-1">
+          <span className="text-muted">Opponent</span>
+          <input
+            value={opponentName}
+            onChange={(e) => setOpponentName(e.target.value)}
+            className="rounded border border-line-strong px-3 py-2"
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-muted">Field number</span>
+          <input
+            value={fieldNumber}
+            onChange={(e) => setFieldNumber(e.target.value)}
+            className="rounded border border-line-strong px-3 py-2"
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-muted">Game date</span>
+          <input
+            type="date"
+            value={gameDate}
+            min={tournamentStartDate}
+            max={tournamentEndDate}
+            onChange={(e) => setGameDate(e.target.value)}
+            className="rounded border border-line-strong px-3 py-2"
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-muted">Start time</span>
+          <input
+            type="time"
+            value={startTime}
+            onChange={(e) => setStartTime(e.target.value)}
+            className="rounded border border-line-strong px-3 py-2"
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-muted">Opposing coach</span>
+          <input
+            value={opposingCoachName}
+            onChange={(e) => setOpposingCoachName(e.target.value)}
+            className="rounded border border-line-strong px-3 py-2"
+          />
+        </label>
+      </div>
+      {gameDateInvalid && (
+        <p className="text-xs text-red-600 dark:text-red-400">
+          Game date must fall within the tournament ({tournamentStartDate}
+          {tournamentEndDate ? ` – ${tournamentEndDate}` : ""}).
+        </p>
+      )}
+      {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
+      <div className="flex justify-end gap-2 pt-1">
+        <button
+          onClick={onClose}
+          className="rounded-md border border-line-strong px-3 py-1.5 text-sm"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={save}
+          disabled={!opponentName.trim() || gameDateInvalid || saving}
+          className="rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white disabled:bg-disabled"
+        >
+          {saving ? "Saving…" : "Save"}
+        </button>
+      </div>
+    </Modal>
   );
 }

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import type { Game, GenderMatch, Point } from "@shared/game-rules";
+import type { Game, GenderMatch, OD, Point } from "@shared/game-rules";
 import { useLiveGame, type LiveGame } from "@/lib/game/useLiveGame";
 import { readTeam } from "@/lib/storage/teams";
 import { findTournament } from "@/lib/storage/tournaments";
@@ -34,13 +34,92 @@ export function GameScreen({ gameId }: { gameId: string }) {
     <div className="space-y-4">
       <BackLink game={live.game} />
       <SyncBar live={live} />
-      {live.state.phase === "completed" ? (
+      {live.game.status === "scheduled" ? (
+        <FlipResultForm live={live} />
+      ) : live.state.phase === "completed" ? (
         <Recap live={live} />
       ) : (
         // awaiting_line + point_in_progress are both handled inside the caller.
         <LiveCaller live={live} />
       )}
     </div>
+  );
+}
+
+// Gates entry into the live caller until the coach records what the coin flip
+// actually decided — field side, team color, and starting O/D are usually
+// only known at that point, not at creation time (§ create-game-form).
+function FlipResultForm({ live }: { live: LiveGame }) {
+  const { game, actions } = live;
+  const [fieldSide, setFieldSide] = useState<"left" | "right">("left");
+  const [teamColor, setTeamColor] = useState<"light" | "dark">("light");
+  const [startingOD, setStartingOD] = useState<OD>("O");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async () => {
+    setSubmitting(true);
+    setError(null);
+    try {
+      await actions.resolveFlip({ fieldSide, teamColor, startingOD });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <section className="space-y-4">
+      <div>
+        <h1 className="text-xl font-semibold">vs {game.opponentName}</h1>
+        <p className="text-sm text-muted">
+          What did the flip decide? This unlocks the live caller.
+        </p>
+      </div>
+      <div className="grid grid-cols-2 gap-3 text-sm">
+        <label className="flex flex-col gap-1">
+          <span className="text-muted">Field side (from home)</span>
+          <select
+            value={fieldSide}
+            onChange={(e) => setFieldSide(e.target.value as "left" | "right")}
+            className="rounded border border-line-strong px-3 py-2"
+          >
+            <option value="left">Left</option>
+            <option value="right">Right</option>
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-muted">Team color</span>
+          <select
+            value={teamColor}
+            onChange={(e) => setTeamColor(e.target.value as "light" | "dark")}
+            className="rounded border border-line-strong px-3 py-2"
+          >
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        </label>
+        <label className="col-span-2 flex flex-col gap-1">
+          <span className="text-muted">Starting on</span>
+          <select
+            value={startingOD}
+            onChange={(e) => setStartingOD(e.target.value as OD)}
+            className="rounded border border-line-strong px-3 py-2"
+          >
+            <option value="O">Offense</option>
+            <option value="D">Defense</option>
+          </select>
+        </label>
+      </div>
+      {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
+      <button
+        onClick={submit}
+        disabled={submitting}
+        className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white disabled:bg-disabled"
+      >
+        {submitting ? "Starting…" : "Start game"}
+      </button>
+    </section>
   );
 }
 

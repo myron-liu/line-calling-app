@@ -40,22 +40,36 @@ export function TeamsList() {
 
   return (
     <section className="space-y-6">
-      <h1 className="text-xl font-semibold">Your teams</h1>
+      <div className="space-y-2">
+        <h1 className="text-xl font-semibold">Your teams</h1>
+        <p className="text-sm text-muted">
+          Line Calling helps ultimate frisbee coaches build gender-ratio-compliant
+          lines from the sideline — track O/D, score, timeouts, and injuries in
+          real time, and manage rosters, tournaments, and reusable lines from any
+          device.
+        </p>
+      </div>
 
       {teams.length === 0 ? (
         <p className="text-muted">No teams yet — create your first below.</p>
       ) : (
         <ul className="space-y-2">
           {teams.map((t) => (
-            <li key={t.id}>
-              <Link
-                href={`/teams/${t.id}`}
-                className="flex items-center justify-between rounded-lg border border-line px-4 py-3 hover:bg-surface-2"
-              >
+            <li
+              key={t.id}
+              className="flex items-center justify-between rounded-lg border border-line px-4 py-3"
+            >
+              <div>
                 <span className="font-medium">{t.name}</span>
-                <span className="text-xs uppercase tracking-wide text-faint">
+                <span className="ml-2 text-xs uppercase tracking-wide text-faint">
                   {t.division}
                 </span>
+              </div>
+              <Link
+                href={`/teams/${t.id}`}
+                className="rounded-md border border-line-strong px-3 py-1.5 text-sm font-medium text-emerald-700 hover:bg-surface-2 dark:text-emerald-400"
+              >
+                View team →
               </Link>
             </li>
           ))}

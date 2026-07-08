@@ -227,6 +227,19 @@ describe("undo (one step, phase-aware)", () => {
     expect(live.ourScore).toBe(6);
   });
 
+  test("a manual halftime call (score not at halfScore) undoes as its own step", () => {
+    let s = fresh();
+    s = playPoint(s, "us"); // 1–0, well short of halfScore (7)
+    s = callHalftime(game, s);
+    expect(s.meta.halftimeReached).toBe(true);
+    const undone = undoLastPoint(game, s);
+    expect(undone.meta.halftimeReached).toBe(false);
+    expect(undone.points).toHaveLength(1); // the point itself is untouched
+    expect(undone.redo).toEqual({ type: "callHalftime" });
+    const redone = redoAction(game, undone, undone.redo);
+    expect(redone.meta.halftimeReached).toBe(true);
+  });
+
   test("redoAction replays exactly what undo reverted", () => {
     let s = fresh();
     s = playPoint(s, "us"); // 1–0, awaiting line 2

@@ -49,9 +49,12 @@ export interface CreateGameInput {
   opponentName: string;
   gameCap: GameCap;
   timeoutsPerHalf: number;
-  startingOD: OD;
   /** Set for Mixed only. */
   startingGenderRatio?: GenderRatio;
+  fieldNumber?: string;
+  gameDate?: string;
+  startTime?: string;
+  opposingCoachName?: string;
   roster: RosterSnapshotEntry[];
 }
 
@@ -63,8 +66,11 @@ export async function createGame(input: CreateGameInput): Promise<Game> {
     gameCap: input.gameCap,
     halfScore: halfScoreForCap(input.gameCap),
     timeoutsPerHalf: input.timeoutsPerHalf,
-    startingOD: input.startingOD,
     startingGenderRatio: input.startingGenderRatio,
+    fieldNumber: input.fieldNumber,
+    gameDate: input.gameDate,
+    startTime: input.startTime,
+    opposingCoachName: input.opposingCoachName,
     roster: input.roster,
   });
 
@@ -75,4 +81,40 @@ export async function createGame(input: CreateGameInput): Promise<Game> {
   writeLastSyncedAt(full.game.id, new Date().toISOString());
   registerGame(full.game.id); // show in the live-game switcher (§13.13)
   return full.game;
+}
+
+// ── Flip result ──────────────────────────────────────────────────────────────
+
+/** Resolves the post-creation coin flip (§ flip-result-form), moving a
+ *  "scheduled" game to "in_progress". Updates the local game-config cache so
+ *  the live caller unlocks immediately. */
+export async function resolveFlip(
+  gameId: string,
+  patch: { fieldSide: "left" | "right"; teamColor: "light" | "dark"; startingOD: OD },
+): Promise<Game> {
+  const game = await api.post<Game>(`/games/${gameId}/resolve-flip`, patch);
+  writeGameConfig(game);
+  return game;
+}
+
+// ── Metadata edit ────────────────────────────────────────────────────────────
+
+export interface GameMetadataPatch {
+  opponentName?: string;
+  fieldNumber?: string | null;
+  gameDate?: string | null;
+  startTime?: string | null;
+  opposingCoachName?: string | null;
+}
+
+/** Edits a game's administrative details (§ edit-game-modal) — safe at any
+ *  status since it never touches gameplay state. Updates the local
+ *  game-config cache too, in case this game is also open in the live caller. */
+export async function updateGameMetadata(
+  gameId: string,
+  patch: GameMetadataPatch,
+): Promise<Game> {
+  const game = await api.patch<Game>(`/games/${gameId}/metadata`, patch);
+  writeGameConfig(game);
+  return game;
 }

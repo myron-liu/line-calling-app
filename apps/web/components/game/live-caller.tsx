@@ -11,7 +11,13 @@ import {
 } from "@shared/game-rules";
 import type { LiveGame } from "@/lib/game/useLiveGame";
 import { isRosterActive, type RosterSnapshotEntry } from "@/lib/storage/gameLog";
-import { displayName, roleTag, sortRoster } from "@/lib/player-display";
+import {
+  LINE_COLOR_CHIP,
+  ROLE_BADGE_COLOR,
+  displayName,
+  roleTag,
+  sortRoster,
+} from "@/lib/player-display";
 
 // The live line caller (§8). Drives the engine hook; only reads/writes localStorage.
 export function LiveCaller({ live }: { live: LiveGame }) {
@@ -284,6 +290,15 @@ function LineBuilder({
     }
     return { mmp, wmp };
   };
+  // Lines/pods tagged for the current point's side sort first (untagged/"both"
+  // in the middle, the opposite side last), so the relevant quick-fills are
+  // right there without scanning past ones for the other side.
+  const sideMatchRank = (lineSide: SavedLine["side"]): number => {
+    if (lineSide === state.od) return 0;
+    if (!lineSide || lineSide === "both") return 1;
+    return 2;
+  };
+
   // A line/pod fits if its MMP and WMP counts each stay within the point's caps.
   // For a full 7 this forces an exact ratio match; for a pod it just has to fit.
   const quickLines = savedLines
@@ -295,7 +310,11 @@ function LineBuilder({
         x.mmp <= maxMMP &&
         x.wmp <= maxWMP,
     )
-    .sort((a, b) => b.line.playerIds.length - a.line.playerIds.length);
+    .sort((a, b) => {
+      const side = sideMatchRank(a.line.side) - sideMatchRank(b.line.side);
+      if (side !== 0) return side;
+      return b.line.playerIds.length - a.line.playerIds.length;
+    });
 
   // Add players up to the caps, deduping and skipping ineligible ones.
   const mergeWithCaps = (base: string[], incoming: string[]) => {
@@ -354,7 +373,9 @@ function LineBuilder({
     const base = line.playerIds.length === 7 ? [] : selected;
     const { next, skipped } = mergeWithCaps(base, line.playerIds);
     setSelected(next);
-    actions.recordLineUsage(line.id);
+    // Usage is recorded when the line is confirmed onto the field (see
+    // confirmAndRecordUsage below), not here — the selection can still change
+    // before the point is actually confirmed.
     setApplyNote(
       skipped > 0
         ? `${skipped} player${skipped > 1 ? "s" : ""} skipped (unavailable or over-ratio)`
@@ -385,6 +406,14 @@ function LineBuilder({
             </span>
           </span>
         </span>
+        {selected.length > 0 && (
+          <button
+            onClick={() => setSelected([])}
+            className="text-xs font-medium text-muted hover:text-fg"
+          >
+            Deselect all
+          </button>
+        )}
       </div>
 
       <SavedLinesBar
@@ -392,7 +421,6 @@ function LineBuilder({
         appliedIds={appliedLineIds}
         ratioLabel={need ? `${maxMMP}M / ${maxWMP}W` : "any 7"}
         onApply={applyLine}
-        onDelete={actions.deleteLine}
         note={applyNote}
       />
 
@@ -458,7 +486,15 @@ function LineBuilder({
 
       <button
         disabled={!result.valid}
-        onClick={() => actions.confirmLine(selected)}
+        onClick={() => {
+          // Only count a line/pod as "used" once it actually lands on the
+          // field — checked against the final selection, not whatever was
+          // true when it was tapped (the pick can still change afterward).
+          for (const line of savedLines) {
+            if (isLineApplied(line)) actions.recordLineUsage(line.id);
+          }
+          actions.confirmLine(selected);
+        }}
         className="w-full rounded-lg bg-emerald-600 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:bg-disabled"
       >
         Confirm line ▸
@@ -707,11 +743,13 @@ function RosterColumn({
                         {slotLabels[p.playerId]}
                       </span>
                     )}
+                    <span
+                      className={`shrink-0 rounded px-1 text-[10px] font-semibold ${ROLE_BADGE_COLOR[p.role]}`}
+                    >
+                      {roleTag(p.role)}
+                    </span>
                     <span className="min-w-0 flex-1 truncate text-left">
                       {displayName(p)}
-                    </span>
-                    <span className="shrink-0 rounded bg-surface-2 px-1 text-[10px] font-medium text-muted">
-                      {roleTag(p.role)}
                     </span>
                   </span>
                   <span
@@ -828,14 +866,12 @@ function SavedLinesBar({
   appliedIds,
   ratioLabel,
   onApply,
-  onDelete,
   note,
 }: {
   lines: QuickLine[];
   appliedIds: Set<string>;
   ratioLabel: string;
   onApply: (line: SavedLine) => void;
-  onDelete: (id: string) => void;
   note: string | null;
 }) {
   return (
@@ -853,40 +889,32 @@ function SavedLinesBar({
           {lines.map(({ line, mmp, wmp }) => {
             const isPod = line.playerIds.length < 7;
             const isApplied = appliedIds.has(line.id);
-            const tone = isPod
-              ? "border-violet-300 dark:border-violet-500/40 bg-violet-50 dark:bg-violet-500/10"
-              : "border-emerald-300 dark:border-emerald-500/40 bg-emerald-50 dark:bg-emerald-500/10";
+            const tone = line.color
+              ? LINE_COLOR_CHIP[line.color]
+              : isPod
+                ? "border-violet-300 bg-violet-50 text-violet-800 dark:border-violet-500/40 dark:bg-violet-500/10 dark:text-violet-300"
+                : "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-300";
             return (
               <span
                 key={line.id}
-                className={`flex items-center gap-1 rounded-full border py-1 pl-3 pr-1 text-sm ${tone} ${
-                  isApplied ? "ring-2 ring-offset-1 ring-offset-surface " + (isPod ? "ring-violet-400" : "ring-emerald-400") : ""
+                className={`flex items-center gap-1 rounded-full border py-1 pl-3 pr-3 text-sm ${tone} ${
+                  isApplied ? "ring-2 ring-offset-1 ring-offset-surface ring-current" : ""
                 }`}
               >
                 <button
                   onClick={() => onApply(line)}
                   aria-pressed={isApplied}
                   title={isApplied ? "Tap to remove" : "Tap to apply"}
-                  className={`flex items-center gap-1.5 font-medium ${
-                    isPod ? "text-violet-800 dark:text-violet-300" : "text-emerald-800 dark:text-emerald-300"
-                  }`}
+                  className="flex items-center gap-1.5 font-medium"
                 >
                   {isApplied && <span aria-hidden>✓</span>}
                   {line.name}
                   <span className="text-[10px] font-normal opacity-70">
-                    {isPod ? `pod · ${mmp}M/${wmp}W` : `${mmp}M/${wmp}W`}
+                    {isPod ? `pod` : "line"}
+                    {line.side && line.side !== "both" ? ` · ${line.side}` : ""}
                     {" · "}
-                    {line.useCount ?? 0}×
+                    {mmp}M/{wmp}W · {line.useCount ?? 0}×
                   </span>
-                </button>
-                <button
-                  onClick={() => onDelete(line.id)}
-                  aria-label={`Delete ${line.name}`}
-                  className={`rounded-full px-1 hover:text-red-600 dark:text-red-400 ${
-                    isPod ? "text-violet-500" : "text-emerald-500"
-                  }`}
-                >
-                  ×
                 </button>
               </span>
             );
@@ -1069,11 +1097,13 @@ function SecondaryControls({ live }: { live: LiveGame }) {
   const { state, actions, canUndo, canRedo } = live;
   return (
     <div className="flex flex-wrap gap-2 border-t border-line pt-3 text-sm">
-      <SmallButton
-        label="Halftime"
-        disabled={state.halftimeReached}
-        onClick={actions.callHalftime}
-      />
+      {state.currentPointNumber > 1 && (
+        <SmallButton
+          label="Halftime"
+          disabled={state.halftimeReached}
+          onClick={actions.callHalftime}
+        />
+      )}
       <SmallButton
         label={`Timeout us (${state.ourTimeoutsRemaining})`}
         disabled={state.ourTimeoutsRemaining <= 0}

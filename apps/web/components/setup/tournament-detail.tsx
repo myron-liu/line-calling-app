@@ -151,7 +151,10 @@ export function TournamentDetail({ tournamentId }: { tournamentId: string }) {
         <div className="flex items-baseline justify-between">
           <h1 className="text-xl font-semibold">{tournament.name}</h1>
           <span className="text-xs uppercase tracking-wide text-faint">
-            {tournament.division} · {tournament.startDate}
+            {tournament.division} ·{" "}
+            {tournament.endDate && tournament.endDate !== tournament.startDate
+              ? `${tournament.startDate} – ${tournament.endDate}`
+              : tournament.startDate}
           </span>
         </div>
       </div>
@@ -178,48 +181,26 @@ export function TournamentDetail({ tournamentId }: { tournamentId: string }) {
             No players on the team roster yet.
           </p>
         ) : (
-          <ul className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
-            {sortRoster(players).map((p) => {
-              const present = presentIds.has(p.id);
-              const injured = injuredIds.has(p.id);
-              return (
-                <li
-                  key={p.id}
-                  className="flex items-center justify-between rounded-md border border-line px-2.5 py-1.5 text-sm"
-                >
-                  <label className="flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={present}
-                      onChange={(e) => setLocalPresent(p.id, e.target.checked)}
-                    />
-                    <span
-                      className={
-                        p.genderMatch === "MMP" ? "text-sky-600 dark:text-sky-400" : "text-rose-600 dark:text-rose-400"
-                      }
-                    >
-                      {p.genderMatch}
-                    </span>
-                    <span className={present ? "" : "text-faint"}>
-                      {p.nickname || p.name}
-                    </span>
-                  </label>
-                  {present && (
-                    <button
-                      onClick={() => setLocalInjured(p.id, !injured)}
-                      className={`rounded px-2 py-0.5 text-xs ${
-                        injured
-                          ? "bg-amber-100 dark:bg-amber-500/20 text-amber-800 dark:text-amber-200"
-                          : "text-faint hover:text-amber-700 dark:text-amber-300"
-                      }`}
-                    >
-                      {injured ? "Injured" : "Healthy"}
-                    </button>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
+          <>
+            <CheckInAccordion
+              label="MMP"
+              tone="sky"
+              players={sortRoster(players.filter((p) => p.genderMatch === "MMP"))}
+              presentIds={presentIds}
+              injuredIds={injuredIds}
+              onTogglePresent={setLocalPresent}
+              onSetInjured={setLocalInjured}
+            />
+            <CheckInAccordion
+              label="WMP"
+              tone="rose"
+              players={sortRoster(players.filter((p) => p.genderMatch === "WMP"))}
+              presentIds={presentIds}
+              injuredIds={injuredIds}
+              onTogglePresent={setLocalPresent}
+              onSetInjured={setLocalInjured}
+            />
+          </>
         )}
       </div>
 
@@ -233,7 +214,12 @@ export function TournamentDetail({ tournamentId }: { tournamentId: string }) {
             Lines &amp; pods →
           </Link>
         </div>
-        <GameList games={games} emptyLabel="No games yet." />
+        <GameList
+          games={games}
+          emptyLabel="No games yet."
+          tournamentStartDate={tournament.startDate}
+          tournamentEndDate={tournament.endDate}
+        />
         {canCreateGame ? (
           <CreateGameForm
             teamId={tournament.teamId}
@@ -242,6 +228,8 @@ export function TournamentDetail({ tournamentId }: { tournamentId: string }) {
             players={presentPlayers}
             injuredIds={injuredIds}
             selectable={false}
+            tournamentStartDate={tournament.startDate}
+            tournamentEndDate={tournament.endDate}
           />
         ) : (
           <p className="text-sm text-muted">
@@ -252,5 +240,85 @@ export function TournamentDetail({ tournamentId }: { tournamentId: string }) {
         )}
       </div>
     </section>
+  );
+}
+
+const CHECKIN_TONE = {
+  sky: {
+    border: "border-sky-200 dark:border-sky-500/30",
+    text: "text-sky-600 dark:text-sky-400",
+  },
+  rose: {
+    border: "border-rose-200 dark:border-rose-500/30",
+    text: "text-rose-600 dark:text-rose-400",
+  },
+} as const;
+
+function CheckInAccordion({
+  label,
+  tone,
+  players,
+  presentIds,
+  injuredIds,
+  onTogglePresent,
+  onSetInjured,
+}: {
+  label: string;
+  tone: keyof typeof CHECKIN_TONE;
+  players: Player[];
+  presentIds: Set<string>;
+  injuredIds: Set<string>;
+  onTogglePresent: (playerId: string, present: boolean) => void;
+  onSetInjured: (playerId: string, injured: boolean) => void;
+}) {
+  const t = CHECKIN_TONE[tone];
+  const presentCount = players.filter((p) => presentIds.has(p.id)).length;
+  return (
+    <details open className={`rounded-lg border p-2 ${t.border}`}>
+      <summary className={`cursor-pointer text-sm font-semibold ${t.text}`}>
+        {label}{" "}
+        <span className="font-normal text-faint">
+          ({presentCount}/{players.length})
+        </span>
+      </summary>
+      <ul className="mt-2 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+        {players.map((p) => {
+          const present = presentIds.has(p.id);
+          const injured = injuredIds.has(p.id);
+          return (
+            <li
+              key={p.id}
+              className="flex items-center justify-between rounded-md border border-line px-2.5 py-1.5 text-sm"
+            >
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={present}
+                  onChange={(e) => onTogglePresent(p.id, e.target.checked)}
+                />
+                <span className={t.text}>{p.genderMatch}</span>
+                <span className={present ? "" : "text-faint"}>
+                  {p.nickname || p.name}
+                </span>
+              </label>
+              {present && (
+                <select
+                  value={injured ? "injured" : "healthy"}
+                  onChange={(e) => onSetInjured(p.id, e.target.value === "injured")}
+                  className={`rounded border px-1.5 py-0.5 text-xs ${
+                    injured
+                      ? "border-amber-300 bg-amber-100 text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/20 dark:text-amber-200"
+                      : "border-line-strong text-faint"
+                  }`}
+                >
+                  <option value="healthy">Healthy</option>
+                  <option value="injured">Injured</option>
+                </select>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </details>
   );
 }

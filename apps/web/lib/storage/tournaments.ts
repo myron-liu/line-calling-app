@@ -32,11 +32,13 @@ export function createTournament(
   name: string,
   division: Division,
   startDate: string,
+  endDate?: string,
 ): Promise<Tournament> {
   return api.post<Tournament>(`/teams/${teamId}/tournaments`, {
     name,
     division,
     startDate,
+    endDate,
   });
 }
 

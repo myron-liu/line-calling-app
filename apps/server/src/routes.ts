@@ -46,6 +46,9 @@ const odPreference = z.enum(["O", "D", "both"]);
 const od = z.enum(["O", "D"]);
 const genderRatio = z.enum(["4MMP_3WMP", "4WMP_3MMP"]);
 const gameCap = z.union([z.literal(13), z.literal(15)]);
+const lineColor = z.enum(["red", "green", "blue", "yellow", "black", "purple"]);
+const fieldSide = z.enum(["left", "right"]);
+const teamColor = z.enum(["light", "dark"]);
 
 const rosterEntry = z.object({
   playerId: z.string(),
@@ -164,7 +167,17 @@ export const routes: Route[] = [
   route("POST", "/teams/:id/tournaments", async (req, { id }) => {
     const body = await parseBody(
       req,
-      z.object({ name: z.string().min(1), division, startDate: z.string() }),
+      z
+        .object({
+          name: z.string().min(1),
+          division,
+          startDate: z.string(),
+          endDate: z.string().optional(),
+        })
+        .refine((b) => !b.endDate || b.endDate >= b.startDate, {
+          message: "endDate must be on or after startDate",
+          path: ["endDate"],
+        }),
     );
     return json(
       await q.createTournament({ id: newId(), teamId: id!, ...body }),
@@ -213,7 +226,12 @@ export const routes: Route[] = [
   route("POST", "/teams/:id/saved-lines", async (req, { id }) => {
     const body = await parseBody(
       req,
-      z.object({ name: z.string().min(1), playerIds: z.array(z.string()).min(1) }),
+      z.object({
+        name: z.string().min(1),
+        playerIds: z.array(z.string()).min(1),
+        color: lineColor.nullable().optional(),
+        side: odPreference.nullable().optional(),
+      }),
     );
     return json(
       await q.createSavedLine({ id: newId(), teamId: id!, ...body }),
@@ -223,7 +241,12 @@ export const routes: Route[] = [
   route("PATCH", "/saved-lines/:id", async (req, { id }) => {
     const body = await parseBody(
       req,
-      z.object({ name: z.string().optional(), playerIds: z.array(z.string()).optional() }),
+      z.object({
+        name: z.string().optional(),
+        playerIds: z.array(z.string()).optional(),
+        color: lineColor.nullable().optional(),
+        side: odPreference.nullable().optional(),
+      }),
     );
     const line = await q.updateSavedLine(id!, body);
     return line ? json(line) : notFound();
@@ -254,16 +277,45 @@ export const routes: Route[] = [
         gameCap,
         halfScore: z.number(),
         timeoutsPerHalf: z.number(),
-        startingOD: od,
+        startingOD: od.optional(),
         startingGenderRatio: genderRatio.optional(),
+        fieldNumber: z.string().optional(),
+        gameDate: z.string().optional(),
+        startTime: z.string().optional(),
+        opposingCoachName: z.string().optional(),
         roster: z.array(rosterEntry),
       }),
     );
     return json(await q.createGame({ id: newId(), ...body }), 201);
   }),
+  route("POST", "/games/:id/resolve-flip", async (req, { id }) => {
+    const body = await parseBody(
+      req,
+      z.object({ fieldSide, teamColor, startingOD: od }),
+    );
+    const game = await q.resolveFlip(id!, body);
+    broadcast(id!, { type: "updated", version: game.version });
+    return json(game);
+  }),
   route("GET", "/games/:id/full", async (_req, { id }) => {
     const full = await q.getGameFull(id!);
     return full ? json(full) : notFound();
+  }),
+  route("PATCH", "/games/:id/metadata", async (req, { id }) => {
+    const body = await parseBody(
+      req,
+      z.object({
+        opponentName: z.string().min(1).optional(),
+        fieldNumber: z.string().nullable().optional(),
+        gameDate: z.string().nullable().optional(),
+        startTime: z.string().nullable().optional(),
+        opposingCoachName: z.string().nullable().optional(),
+      }),
+    );
+    const game = await q.updateGameMetadata(id!, body);
+    if (!game) return notFound();
+    broadcast(id!, { type: "updated", version: game.version });
+    return json(game);
   }),
   route("PUT", "/games/:id/sync", async (req, { id }) => {
     const body = await parseBody(

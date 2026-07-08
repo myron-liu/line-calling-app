@@ -8,7 +8,7 @@
 // local read-through cache: a fetch failure (offline sideline) falls back to
 // whatever was last fetched instead of leaving the quick-lines bar empty.
 
-import type { SavedLine } from "@shared/game-rules";
+import type { LineColor, ODPreference, SavedLine } from "@shared/game-rules";
 import { api } from "../api/client";
 import { keys } from "./keys";
 import { read, write } from "./store";
@@ -27,13 +27,23 @@ export function createSavedLine(
   teamId: string,
   name: string,
   playerIds: string[],
+  options?: { color?: LineColor | null; side?: ODPreference | null },
 ): Promise<SavedLine> {
-  return api.post<SavedLine>(`/teams/${teamId}/saved-lines`, { name, playerIds });
+  return api.post<SavedLine>(`/teams/${teamId}/saved-lines`, {
+    name,
+    playerIds,
+    ...options,
+  });
 }
 
 export function updateSavedLine(
   id: string,
-  patch: { name?: string; playerIds?: string[] },
+  patch: {
+    name?: string;
+    playerIds?: string[];
+    color?: LineColor | null;
+    side?: ODPreference | null;
+  },
 ): Promise<SavedLine> {
   return api.patch<SavedLine>(`/saved-lines/${id}`, patch);
 }

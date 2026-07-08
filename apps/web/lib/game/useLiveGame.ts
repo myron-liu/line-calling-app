@@ -5,6 +5,7 @@ import {
   callHalftime,
   callTimeout,
   confirmLine,
+  deriveHalftimeReached,
   deriveLiveGameState,
   editPointLineup,
   endGame,
@@ -16,6 +17,7 @@ import {
   type GameLogState,
   type GameMeta,
   type LiveGameState,
+  type OD,
   type Point,
   type PointResult,
   type RedoAction,
@@ -49,10 +51,10 @@ import {
 } from "@/lib/storage/outbox";
 import {
   createSavedLine,
-  deleteSavedLine,
   incrementLineUsage,
   readSavedLines,
 } from "@/lib/storage/savedLines";
+import { resolveFlip as resolveFlipApi } from "@/lib/storage/games";
 
 /** Saved lines are team-scoped (§4.3). */
 const savedLinesScope = (game: Game): string => game.teamId;
@@ -101,7 +103,6 @@ export interface LiveGame {
      *  other action invalidates it (see commit()). */
     redo: () => void;
     saveLine: (name: string, playerIds: string[]) => void;
-    deleteLine: (id: string) => void;
     recordLineUsage: (id: string) => void;
     setInjured: (playerId: string, injured: boolean) => void;
     /** Manually push pending local changes, or — if rejected as stale, or if
@@ -109,6 +110,13 @@ export interface LiveGame {
      *  adopt it (discarding any unsynced local changes; see queries.ts's
      *  syncGame for why a stale push is rejected instead of overwriting). */
     resyncNow: () => void;
+    /** Resolves the post-creation coin flip, moving the game from
+     *  "scheduled" to "in_progress" (see flip-result-form). */
+    resolveFlip: (patch: {
+      fieldSide: "left" | "right";
+      teamColor: "light" | "dark";
+      startingOD: OD;
+    }) => Promise<void>;
   };
   error: string | null;
 }
@@ -422,15 +430,6 @@ export function useLiveGame(gameId: string): LiveGameResult {
             .then(() => readSavedLines(scope))
             .then(setSavedLines);
         }),
-      deleteLine: (id: string) =>
-        run(() => {
-          if (!game) return;
-          const scope = savedLinesScope(game);
-          deleteSavedLine(id)
-            .catch(() => {})
-            .then(() => readSavedLines(scope))
-            .then(setSavedLines);
-        }),
       recordLineUsage: (id: string) =>
         run(() => {
           if (!game) return;
@@ -487,6 +486,14 @@ export function useLiveGame(gameId: string): LiveGameResult {
             }
           })();
         }),
+      resolveFlip: async (patch: {
+        fieldSide: "left" | "right";
+        teamColor: "light" | "dark";
+        startingOD: OD;
+      }) => {
+        const updated = await resolveFlipApi(gameId, patch);
+        setGame(updated);
+      },
     }),
     [game, log, roster, pendingRedo, commit, run, gameId, adoptServerState],
   );
@@ -503,7 +510,10 @@ export function useLiveGame(gameId: string): LiveGameResult {
       points: log.points,
       savedLines,
       carryOver,
-      canUndo: log.meta.endedManually || log.points.length > 0,
+      canUndo:
+        log.meta.endedManually ||
+        log.points.length > 0 ||
+        (log.meta.halftimeReached && !deriveHalftimeReached(game, log.points)),
       canRedo: pendingRedo !== null,
       sync: syncState,
       actions,

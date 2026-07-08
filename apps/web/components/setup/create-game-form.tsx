@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { Division, GameCap, OD, Player } from "@shared/game-rules";
+import type { Division, GameCap, Player } from "@shared/game-rules";
 import { createGame, rosterSnapshot } from "@/lib/storage/games";
 
 // Create-game form, shared by individual games (pick a subset of the team roster)
@@ -15,6 +15,8 @@ export function CreateGameForm({
   players,
   injuredIds,
   selectable,
+  tournamentStartDate,
+  tournamentEndDate,
 }: {
   teamId: string;
   tournamentId?: string;
@@ -24,6 +26,10 @@ export function CreateGameForm({
   injuredIds?: ReadonlySet<string>;
   /** Whether the coach picks a subset of `players` for this game's roster. */
   selectable: boolean;
+  /** For a tournament game, constrains the game-date picker to the
+   *  tournament's date range. */
+  tournamentStartDate?: string;
+  tournamentEndDate?: string;
 }) {
   const router = useRouter();
   const isMixed = division === "mixed";
@@ -32,8 +38,11 @@ export function CreateGameForm({
   const [opponent, setOpponent] = useState("");
   const [cap, setCap] = useState<GameCap>(13);
   const [timeouts, setTimeouts] = useState(2);
-  const [startingOD, setStartingOD] = useState<OD>("O");
   const [manMajorityFirst, setManMajorityFirst] = useState(true);
+  const [fieldNumber, setFieldNumber] = useState("");
+  const [gameDate, setGameDate] = useState(tournamentStartDate ?? "");
+  const [startTime, setStartTime] = useState("");
+  const [opposingCoachName, setOpposingCoachName] = useState("");
   const [selected, setSelected] = useState<Set<string>>(
     () => new Set(players.map((p) => p.id)),
   );
@@ -55,6 +64,11 @@ export function CreateGameForm({
       ? `Mixed games need 4 of a gender some points — you have ${counts.mmp} MMP / ${counts.wmp} WMP.`
       : null;
 
+  const gameDateInvalid =
+    gameDate !== "" &&
+    ((tournamentStartDate !== undefined && gameDate < tournamentStartDate) ||
+      (tournamentEndDate !== undefined && gameDate > tournamentEndDate));
+
   const toggle = (id: string) =>
     setSelected((cur) => {
       const next = new Set(cur);
@@ -66,6 +80,7 @@ export function CreateGameForm({
   const [error, setError] = useState<string | null>(null);
 
   const submit = async () => {
+    if (gameDateInvalid) return;
     const roster = rosterSnapshot(chosen, injuredIds ?? new Set());
     setCreating(true);
     setError(null);
@@ -76,12 +91,15 @@ export function CreateGameForm({
         opponentName: opponent.trim() || "Opponent",
         gameCap: cap,
         timeoutsPerHalf: timeouts,
-        startingOD,
         startingGenderRatio: isMixed
           ? manMajorityFirst
             ? "4MMP_3WMP"
             : "4WMP_3MMP"
           : undefined,
+        fieldNumber: fieldNumber.trim() || undefined,
+        gameDate: gameDate || undefined,
+        startTime: startTime.trim() || undefined,
+        opposingCoachName: opposingCoachName.trim() || undefined,
         roster,
       });
       router.push(`/games/${game.id}`);
@@ -137,15 +155,42 @@ export function CreateGameForm({
           />
         </label>
         <label className="flex flex-col gap-1">
-          <span className="text-muted">Start on</span>
-          <select
-            value={startingOD}
-            onChange={(e) => setStartingOD(e.target.value as OD)}
+          <span className="text-muted">Field number</span>
+          <input
+            value={fieldNumber}
+            onChange={(e) => setFieldNumber(e.target.value)}
+            placeholder="e.g. 4"
             className="rounded border border-line-strong px-3 py-2"
-          >
-            <option value="O">Offense</option>
-            <option value="D">Defense</option>
-          </select>
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-muted">Game date</span>
+          <input
+            type="date"
+            value={gameDate}
+            min={tournamentStartDate}
+            max={tournamentEndDate}
+            onChange={(e) => setGameDate(e.target.value)}
+            className="rounded border border-line-strong px-3 py-2"
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-muted">Start time</span>
+          <input
+            type="time"
+            value={startTime}
+            onChange={(e) => setStartTime(e.target.value)}
+            className="rounded border border-line-strong px-3 py-2"
+          />
+        </label>
+        <label className="col-span-2 flex flex-col gap-1">
+          <span className="text-muted">Opposing coach</span>
+          <input
+            value={opposingCoachName}
+            onChange={(e) => setOpposingCoachName(e.target.value)}
+            placeholder="e.g. Jamie Rivera"
+            className="rounded border border-line-strong px-3 py-2"
+          />
         </label>
         {isMixed && (
           <label className="flex flex-col gap-1">
@@ -198,15 +243,21 @@ export function CreateGameForm({
           Need at least 7 players on the roster ({counts.total} selected).
         </p>
       )}
+      {gameDateInvalid && (
+        <p className="text-xs text-red-600 dark:text-red-400">
+          Game date must fall within the tournament ({tournamentStartDate}
+          {tournamentEndDate ? ` – ${tournamentEndDate}` : ""}).
+        </p>
+      )}
       {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
 
       <div className="flex gap-2">
         <button
           onClick={submit}
-          disabled={!enoughPlayers || creating}
+          disabled={!enoughPlayers || gameDateInvalid || creating}
           className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white disabled:bg-disabled"
         >
-          {creating ? "Creating…" : "Create & start"}
+          {creating ? "Creating…" : "Create game"}
         </button>
         <button
           onClick={() => setOpen(false)}

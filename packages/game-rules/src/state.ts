@@ -319,7 +319,8 @@ export function editPointLineup(
 export type RedoAction =
   | { type: "confirmLine"; lineup: string[]; pointId: string }
   | { type: "recordResult"; scorer: PointResult }
-  | { type: "endGame" };
+  | { type: "endGame" }
+  | { type: "callHalftime" };
 
 export interface UndoResult extends GameLogState {
   /** The reverted point's line, so the UI can pre-select it for a re-call.
@@ -336,6 +337,11 @@ export interface UndoResult extends GameLogState {
  * screen rather than always losing a whole point.
  *
  *  - Manually ended → un-end (back to whatever phase the score implies).
+ *  - Halftime is flagged but no point actually crossed it (a manual
+ *    "Halftime" tap, not the score reaching halfScore) → clear the flag; the
+ *    timeout reset from calling it isn't reversed (there's no record of what
+ *    they were before), but that's a rare, low-stakes edge of undoing an
+ *    accidental tap.
  *  - A line is confirmed but undecided (point_in_progress) → un-confirm it,
  *    back to awaiting_line for the same point, with its lineup restored so
  *    the coach can re-pick or just re-confirm it.
@@ -356,6 +362,14 @@ export function undoLastPoint(
       meta: { ...state.meta, endedManually: false },
       restoredLineup: null,
       redo: { type: "endGame" },
+    };
+  }
+  if (state.meta.halftimeReached && !deriveHalftimeReached(game, state.points)) {
+    return {
+      points: state.points,
+      meta: { ...state.meta, halftimeReached: false },
+      restoredLineup: null,
+      redo: { type: "callHalftime" },
     };
   }
   if (state.points.length === 0) throw new Error("Nothing to undo");
@@ -403,5 +417,7 @@ export function redoAction(
       return recordResult(game, state, action.scorer);
     case "endGame":
       return endGame(state);
+    case "callHalftime":
+      return callHalftime(game, state);
   }
 }

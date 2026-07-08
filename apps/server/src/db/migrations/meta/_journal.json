@@ -15,6 +15,20 @@
       "when": 1783440814638,
       "tag": "0001_dark_vapor",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1783497252435,
+      "tag": "0002_tranquil_alex_wilder",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1783499583890,
+      "tag": "0003_add_game_date",
+      "breakpoints": true
     }
   ]
 }

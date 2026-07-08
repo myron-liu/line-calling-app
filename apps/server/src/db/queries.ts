@@ -12,6 +12,7 @@ import type {
   GameStatus,
   GenderMatch,
   GenderRatio,
+  LineColor,
   OD,
   ODPreference,
   Player,
@@ -121,8 +122,35 @@ export async function updatePlayer(
   return row ? toPlayer(row) : null;
 }
 
+/**
+ * Deleting a player also strips them from every saved line/pod on the team —
+ * otherwise the pod silently keeps an unreplaceable, invisible slot for a
+ * player who no longer exists. A pod that ends up with no players left is
+ * removed rather than kept around empty. This is distinct from tournament
+ * check-in: being marked absent/injured there never touches saved lines,
+ * since that's a per-tournament availability flag, not a roster removal.
+ */
 export async function deletePlayer(id: string): Promise<void> {
+  const [player] = await db.select().from(players).where(eq(players.id, id));
   await db.delete(players).where(eq(players.id, id));
+  if (!player) return;
+
+  const teamLines = await db
+    .select()
+    .from(savedLines)
+    .where(eq(savedLines.teamId, player.teamId));
+  for (const line of teamLines) {
+    if (!line.playerIds.includes(id)) continue;
+    const nextPlayerIds = line.playerIds.filter((pid) => pid !== id);
+    if (nextPlayerIds.length === 0) {
+      await db.delete(savedLines).where(eq(savedLines.id, line.id));
+    } else {
+      await db
+        .update(savedLines)
+        .set({ playerIds: nextPlayerIds })
+        .where(eq(savedLines.id, line.id));
+    }
+  }
 }
 
 function toPlayer(row: typeof players.$inferSelect): Player {
@@ -163,6 +191,7 @@ export async function createTournament(input: {
   name: string;
   division: Division;
   startDate: string;
+  endDate?: string;
 }): Promise<Tournament> {
   const [row] = await db
     .insert(tournaments)
@@ -172,6 +201,7 @@ export async function createTournament(input: {
       name: input.name,
       division: input.division,
       startDate: input.startDate,
+      endDate: input.endDate,
     })
     .returning();
   return toTournament(row!);
@@ -352,6 +382,8 @@ export async function createSavedLine(input: {
   teamId: string;
   name: string;
   playerIds: string[];
+  color?: LineColor | null;
+  side?: ODPreference | null;
 }): Promise<SavedLine> {
   const existing = await db
     .select()
@@ -367,7 +399,7 @@ export async function createSavedLine(input: {
     }
     const [row] = await db
       .update(savedLines)
-      .set({ playerIds: input.playerIds })
+      .set({ playerIds: input.playerIds, color: input.color, side: input.side })
       .where(eq(savedLines.id, match.id))
       .returning();
     return toSavedLine(row!);
@@ -380,6 +412,8 @@ export async function createSavedLine(input: {
       teamId: input.teamId,
       name: input.name,
       playerIds: input.playerIds,
+      color: input.color,
+      side: input.side,
     })
     .returning();
   return toSavedLine(row!);
@@ -395,7 +429,12 @@ export async function createSavedLine(input: {
  */
 export async function updateSavedLine(
   id: string,
-  patch: { name?: string; playerIds?: string[] },
+  patch: {
+    name?: string;
+    playerIds?: string[];
+    color?: LineColor | null;
+    side?: ODPreference | null;
+  },
 ): Promise<SavedLine | null> {
   const [existing] = await db.select().from(savedLines).where(eq(savedLines.id, id));
   if (!existing) return null;
@@ -453,6 +492,8 @@ function toSavedLine(row: typeof savedLines.$inferSelect): SavedLine {
     name: row.name,
     playerIds: row.playerIds,
     useCount: row.useCount,
+    color: (row.color as LineColor) ?? undefined,
+    side: (row.side as ODPreference) ?? undefined,
     createdAt: row.createdAt.toISOString(),
   };
 }
@@ -486,12 +527,31 @@ export interface CreateGameInput {
   gameCap: GameCap;
   halfScore: number;
   timeoutsPerHalf: number;
-  startingOD: OD;
+  /**
+   * Unread while the game sits in "scheduled" status — the real value is
+   * supplied by resolveFlip once the coin flip has actually happened.
+   * Defaults to "O" since the frontend no longer collects this at creation.
+   */
+  startingOD?: OD;
   startingGenderRatio?: GenderRatio;
+  fieldNumber?: string;
+  gameDate?: string;
+  startTime?: string;
+  opposingCoachName?: string;
   roster: RosterSnapshotEntry[];
 }
 
 export async function createGame(input: CreateGameInput): Promise<GameFull> {
+  if (input.tournamentId && input.gameDate) {
+    const tournament = await getTournament(input.tournamentId);
+    if (
+      tournament &&
+      (input.gameDate < tournament.startDate ||
+        (tournament.endDate && input.gameDate > tournament.endDate))
+    ) {
+      throw new Error("Game date must fall within the tournament's date range");
+    }
+  }
   const [row] = await db
     .insert(games)
     .values({
@@ -503,8 +563,12 @@ export async function createGame(input: CreateGameInput): Promise<GameFull> {
       halfScore: input.halfScore,
       timeoutsPerHalf: input.timeoutsPerHalf,
       startingGenderRatio: input.startingGenderRatio,
-      startingOD: input.startingOD,
-      status: "in_progress",
+      startingOD: input.startingOD ?? "O",
+      fieldNumber: input.fieldNumber,
+      gameDate: input.gameDate,
+      startTime: input.startTime,
+      opposingCoachName: input.opposingCoachName,
+      status: "scheduled",
       ourTimeoutsRemaining: input.timeoutsPerHalf,
       theirTimeoutsRemaining: input.timeoutsPerHalf,
     })
@@ -534,6 +598,70 @@ export async function createGame(input: CreateGameInput): Promise<GameFull> {
     roster: input.roster,
     points: [],
   };
+}
+
+/**
+ * Resolves the post-creation coin flip, moving a "scheduled" game to
+ * "in_progress" with the details only known once the flip actually happens
+ * (§ create-game-form / flip-result-form). Throws if the game isn't
+ * currently "scheduled" — this is a one-time transition.
+ */
+export async function resolveFlip(
+  gameId: string,
+  patch: { fieldSide: "left" | "right"; teamColor: "light" | "dark"; startingOD: OD },
+): Promise<Game> {
+  const [existing] = await db.select().from(games).where(eq(games.id, gameId));
+  if (!existing) throw new Error("Game not found");
+  if (existing.status !== "scheduled") {
+    throw new Error("This game's flip has already been resolved");
+  }
+  const [row] = await db
+    .update(games)
+    .set({
+      fieldSide: patch.fieldSide,
+      teamColor: patch.teamColor,
+      startingOD: patch.startingOD,
+      status: "in_progress",
+    })
+    .where(eq(games.id, gameId))
+    .returning();
+  return toGame(row!);
+}
+
+/**
+ * Updates a game's administrative metadata (§ edit-game-modal) — opponent
+ * name, field number, opposing coach name, date/time. Doesn't touch
+ * gameplay state (score, roster, flip result), so it's safe at any status.
+ */
+export async function updateGameMetadata(
+  gameId: string,
+  patch: {
+    opponentName?: string;
+    fieldNumber?: string | null;
+    gameDate?: string | null;
+    startTime?: string | null;
+    opposingCoachName?: string | null;
+  },
+): Promise<Game | null> {
+  if (patch.gameDate) {
+    const [existing] = await db.select().from(games).where(eq(games.id, gameId));
+    if (existing?.tournamentId) {
+      const tournament = await getTournament(existing.tournamentId);
+      if (
+        tournament &&
+        (patch.gameDate < tournament.startDate ||
+          (tournament.endDate && patch.gameDate > tournament.endDate))
+      ) {
+        throw new Error("Game date must fall within the tournament's date range");
+      }
+    }
+  }
+  const [row] = await db
+    .update(games)
+    .set(patch)
+    .where(eq(games.id, gameId))
+    .returning();
+  return row ? toGame(row) : null;
 }
 
 export async function listTeamGames(teamId: string): Promise<Game[]> {
@@ -692,6 +820,12 @@ function toGame(row: typeof games.$inferSelect): Game {
     timeoutsPerHalf: row.timeoutsPerHalf,
     startingGenderRatio: (row.startingGenderRatio as GenderRatio) ?? undefined,
     startingOD: row.startingOD as OD,
+    fieldNumber: row.fieldNumber ?? undefined,
+    gameDate: row.gameDate ?? undefined,
+    startTime: row.startTime ?? undefined,
+    opposingCoachName: row.opposingCoachName ?? undefined,
+    fieldSide: (row.fieldSide as "left" | "right" | null) ?? undefined,
+    teamColor: (row.teamColor as "light" | "dark" | null) ?? undefined,
     status: row.status as GameStatus,
     createdAt: row.createdAt.toISOString(),
     version: row.version,
