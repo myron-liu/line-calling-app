@@ -8,6 +8,8 @@ primary_region = 'sjc'
 
 [build]
   dockerfile = 'apps/web/Dockerfile'
+  [build.args]
+    NEXT_PUBLIC_API_URL = 'https://line-calling-server.fly.dev'
 
 [http_service]
   internal_port = 3100
