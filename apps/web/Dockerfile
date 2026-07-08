@@ -20,6 +20,12 @@ COPY apps/web apps/web
 ARG NEXT_PUBLIC_API_URL=http://localhost:4000
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 WORKDIR /app/apps/web
+# A fresh version on every build with real code changes (this RUN sits after
+# COPY apps/web above, so Docker's layer cache only re-executes it when
+# something actually changed) - lets the client wipe stale localStorage on
+# its own the moment it loads a new build, with no manual version bump to
+# remember (see lib/storage/store.ts's sweepStaleStorageOnNewBuild).
+RUN echo "NEXT_PUBLIC_APP_VERSION=$(date +%s)" >> .env.production
 RUN bun run build
 
 FROM oven/bun:1-slim AS runner

@@ -48,6 +48,7 @@ import {
   enqueue,
   flush,
   pendingCountFor,
+  type FlushResult,
   type OutboxEventType,
 } from "@/lib/storage/outbox";
 import {
@@ -165,6 +166,18 @@ export function useLiveGame(gameId: string): LiveGameResult {
     endedManually: false,
   });
 
+  // The version runSync() must send with its *next* attempt. Updated
+  // synchronously at every point `game`'s version conceptually changes
+  // (here, and in runSync()'s own success branch) — never via a `useEffect`
+  // keyed on `game`, since an effect only runs after React commits a render,
+  // and two chained sync attempts can be microtasks apart, well inside that
+  // gap. Relying on an effect-lagged ref here would read the *previous*
+  // version for a rapid second attempt, causing the server to genuinely
+  // reject it as stale even though nothing external caused it - discarding
+  // that second attempt's local change entirely once adoptServerState below
+  // overwrites it with the server's (not-yet-updated) copy.
+  const versionRef = useRef<number | null>(null);
+
   /** Overwrite the local cache with the server's authoritative state — used to
    *  resolve a sync conflict, or to catch up when another device has moved the
    *  game ahead of us. Drops any pending outbox events for this game, since
@@ -178,6 +191,7 @@ export function useLiveGame(gameId: string): LiveGameResult {
       dropPending(gameId);
       const now = new Date().toISOString();
       writeLastSyncedAt(gameId, now);
+      versionRef.current = full.game.version;
       setGame(full.game);
       setRoster(full.roster);
       setLog({ points: full.points, meta: full.meta });
@@ -200,6 +214,7 @@ export function useLiveGame(gameId: string): LiveGameResult {
     let cancelled = false;
     const g = readGameConfig(gameId);
     if (g) {
+      versionRef.current = g.version;
       setGame(g);
       setRoster(readRosterSnapshot(gameId));
       readSavedLines(savedLinesScope(g)).then(setSavedLines);
@@ -234,6 +249,58 @@ export function useLiveGame(gameId: string): LiveGameResult {
     gameRef.current = game;
   }, [game]);
 
+  // Every sync attempt is chained through this ref so overlapping ones (e.g.
+  // two actions committed in quick succession — well within a single
+  // PUT /sync round-trip of each other, which the live caller does nothing
+  // to prevent, since setLog()/setError() happen synchronously and the next
+  // action can fire immediately) can never race each other with the same
+  // stale version. Without this, a fast second commit would read the same
+  // version the first one just used, get a perfectly legitimate 409 back
+  // once the first one's already landed, and this device would see its
+  // *own* prior action mislabeled as "updated from another device" — not a
+  // real cross-device conflict at all. Chaining onto this ref means each
+  // attempt only ever runs once every prior one has fully settled (success
+  // or not), so it always reads versionRef.current *after* that prior
+  // attempt's own update to it.
+  const syncChainRef = useRef<Promise<void>>(Promise.resolve());
+
+  const runSync = useCallback((): Promise<FlushResult> => {
+    const attempt: Promise<FlushResult> = syncChainRef.current.then(async () => {
+      const current = gameRef.current;
+      const version = versionRef.current;
+      if (!current || version === null) return { status: "nothing-pending" } as const;
+      const result = await flush(gameId, {
+        version,
+        meta: readMeta(gameId) ?? defaultMeta(current),
+        points: readLog(gameId),
+        roster: readRosterSnapshot(gameId),
+      });
+      if (result.status === "synced") {
+        const updated = readGameConfig(gameId);
+        if (updated) {
+          versionRef.current = updated.version;
+          setGame(updated);
+        }
+        setSyncState({ status: "synced", lastSyncedAt: readLastSyncedAt(gameId) });
+      } else if (result.status === "conflict") {
+        // A real conflict: this attempt's version, read *after* every
+        // earlier queued attempt already landed, was still rejected — the
+        // server genuinely moved on without us.
+        adoptServerState(result.full, true);
+      } else if (result.status === "offline") {
+        setSyncState((s) => ({ ...s, status: "offline" }));
+      }
+      return result;
+    });
+    // Keep the chain alive even if this attempt throws, so one failure
+    // doesn't permanently wedge every later commit's sync.
+    syncChainRef.current = attempt.then(
+      () => undefined,
+      () => undefined,
+    );
+    return attempt;
+  }, [gameId, adoptServerState]);
+
   // Real-time conflict notifications (see apps/server/src/sse.ts): while this
   // game is open, learn about another device's write immediately instead of
   // only on our own next (rejected) sync attempt. Either way — a clean write
@@ -245,14 +312,14 @@ export function useLiveGame(gameId: string): LiveGameResult {
   // The server broadcasts a game's own writer back to itself too (it has no
   // way to know which open connection is "the one that just wrote"), and it
   // does so *before* that writer's own PUT /games/:id/sync response comes
-  // back — so this handler can see the version bump before commit()'s own
-  // flush().then() has run. If we have a pending outbox event for this game,
-  // that in-flight write is almost certainly what this broadcast is echoing
-  // back, not a foreign update; skip it and let that flush's own result
-  // reconcile things (a clean success, or, if it really was overtaken, a 409
-  // that correctly reports the replacement). Without this guard, a coach
-  // making changes alone on one device would routinely see "updated from
-  // another device" for their own actions.
+  // back — so this handler can see the version bump before runSync()'s own
+  // chained attempt has resolved. If we have a pending outbox event for this
+  // game, that in-flight write is almost certainly what this broadcast is
+  // echoing back, not a foreign update; skip it and let that attempt's own
+  // result reconcile things (a clean success, or, if it really was
+  // overtaken, a 409 that correctly reports the replacement). Without this
+  // guard, a coach making changes alone on one device would routinely see
+  // "updated from another device" for their own actions.
   useEffect(() => {
     const source = new EventSource(apiUrl(`/games/${gameId}/events`));
     source.onmessage = (ev) => {
@@ -322,25 +389,13 @@ export function useLiveGame(gameId: string): LiveGameResult {
       .catch(() => {});
 
     // Flush any outbox backlog left over from a previous offline session.
-    // flush() itself no-ops if there's nothing pending. A conflict here means
-    // the game moved on while we were offline — refresh rather than leave the
-    // coach staring at a blocked state (see adoptServerState).
-    flush(gameId, {
-      version: game.version,
-      meta: readMeta(gameId) ?? defaultMeta(game),
-      points: readLog(gameId),
-      roster: readRosterSnapshot(gameId),
-    }).then((result) => {
-      if (result.status === "synced") {
-        const updated = readGameConfig(gameId);
-        if (updated) setGame(updated);
-        setSyncState({ status: "synced", lastSyncedAt: readLastSyncedAt(gameId) });
-      } else if (result.status === "conflict") {
-        adoptServerState(result.full, true);
-      } else if (result.status === "offline") {
-        setSyncState((s) => ({ ...s, status: "offline" }));
-      }
-    });
+    // Routed through the same serialized runSync() as every other sync
+    // attempt (see its definition above) rather than a raw flush() call, so
+    // this can never race a commit's own in-flight sync with a stale
+    // version — it just queues behind it. runSync() itself no-ops if
+    // there's nothing pending, and already handles a conflict by refreshing
+    // rather than leaving the coach staring at a blocked state.
+    runSync();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [game, gameId]);
 
@@ -349,11 +404,10 @@ export function useLiveGame(gameId: string): LiveGameResult {
     [game, log],
   );
 
-  /** Persist a new log state, mirror to the outbox, and best-effort sync. If
-   *  the flush comes back rejected because the server is further along than
-   *  the version we just wrote against, we don't leave that transition
-   *  sitting in local storage — adoptServerState overwrites it wholesale
-   *  with the server's current state instead (see below). */
+  /** Persist a new log state, mirror to the outbox, and best-effort sync via
+   *  the serialized runSync() (see its definition above) — never a raw
+   *  flush() here, so a burst of fast commits can't race each other with a
+   *  stale version. */
   const commit = useCallback(
     (next: GameLogState, type: OutboxEventType, payload: unknown) => {
       // Any real log mutation invalidates a pending redo — it was only ever
@@ -365,28 +419,9 @@ export function useLiveGame(gameId: string): LiveGameResult {
       enqueue(gameId, type, payload);
       setLog(next);
       setError(null);
-      if (!game) return;
-      flush(gameId, {
-        version: game.version,
-        meta: next.meta,
-        points: next.points,
-        roster: readRosterSnapshot(gameId),
-      }).then((result) => {
-        if (result.status === "synced") {
-          const updated = readGameConfig(gameId);
-          if (updated) setGame(updated);
-          setSyncState({ status: "synced", lastSyncedAt: readLastSyncedAt(gameId) });
-        } else if (result.status === "conflict") {
-          // The transition we just wrote was computed off a version the
-          // server has already moved past — discard it by refreshing rather
-          // than leaving it (wrongly) sitting in local storage.
-          adoptServerState(result.full, true);
-        } else if (result.status === "offline") {
-          setSyncState((s) => ({ ...s, status: "offline" }));
-        }
-      });
+      runSync();
     },
-    [gameId, game, adoptServerState],
+    [gameId, runSync],
   );
 
   /** Wrap a reducer call so thrown validation errors surface, not crash. */
@@ -501,32 +536,19 @@ export function useLiveGame(gameId: string): LiveGameResult {
           if (!game || !log) return;
           setSyncState((s) => ({ ...s, status: "syncing" }));
           (async () => {
-            const result = await flush(gameId, {
-              version: game.version,
-              meta: log.meta,
-              points: log.points,
-              roster,
-            });
-            if (result.status === "synced") {
-              const updated = readGameConfig(gameId);
-              if (updated) setGame(updated);
-              setSyncState({ status: "synced", lastSyncedAt: readLastSyncedAt(gameId) });
-              setError(null);
-              return;
-            }
-            if (result.status === "conflict") {
-              adoptServerState(result.full, true);
-              return;
-            }
-            if (result.status === "offline") {
-              setSyncState((s) => ({ ...s, status: "offline" }));
+            const knownVersion = game.version;
+            const result = await runSync();
+            if (result.status !== "nothing-pending") {
+              // synced/conflict/offline are already fully handled inside
+              // runSync() (state + any "another device" message).
+              if (result.status === "synced") setError(null);
               return;
             }
             // Nothing pending locally — check explicitly in case another
             // device has moved the game ahead of us since our last sync.
             try {
               const full = await api.get<GameFull>(`/games/${gameId}/full`);
-              if (full.game.version !== game.version) {
+              if (full.game.version !== knownVersion) {
                 adoptServerState(full, false);
               } else {
                 const now = new Date().toISOString();
@@ -553,7 +575,7 @@ export function useLiveGame(gameId: string): LiveGameResult {
         setGame(updated);
       },
     }),
-    [game, log, roster, pendingRedo, commit, run, gameId, adoptServerState],
+    [game, log, roster, pendingRedo, commit, run, runSync, gameId, adoptServerState],
   );
 
   if (notFound) return { status: "not_found" };

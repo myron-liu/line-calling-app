@@ -78,6 +78,18 @@ docker build -f apps/web/Dockerfile \
 docker run -p 3100:3100 line-calling-web
 ```
 
+**Fly.io:** this build arg is persisted in `fly.web.toml`'s `[build.args]`
+rather than passed on the `fly deploy` command line — a plain `fly deploy`
+without it silently falls back to the Dockerfile's `localhost:4000` default,
+which breaks every API call from a real browser. If you ever add another
+`NEXT_PUBLIC_*` var, add it there too rather than relying on remembering a
+CLI flag on every deploy.
+
+The Dockerfile also bakes in `NEXT_PUBLIC_APP_VERSION` automatically (a build
+timestamp — no action needed) so a client with an older build cached in
+localStorage clears it on next load instead of risking a stale shape against
+new code (see `lib/storage/store.ts`'s `sweepStaleStorageOnNewBuild`).
+
 ## 4. Local dev with Docker Compose
 
 `docker-compose.yml` at the repo root runs a throwaway local Postgres plus both
