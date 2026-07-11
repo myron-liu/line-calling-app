@@ -45,7 +45,8 @@ export function LiveCaller({ live }: { live: LiveGame }) {
 
 function Header({ live }: { live: LiveGame }) {
   const { state, game } = live;
-  const odColor = state.od === "O" ? "bg-sky-600" : "bg-orange-600";
+  const odColor = state.od === "O" ? "bg-red-600" : "bg-blue-600";
+  const fieldSide = fieldSideLabel(live);
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
@@ -70,6 +71,7 @@ function Header({ live }: { live: LiveGame }) {
           TO {state.ourTimeoutsRemaining}·{state.theirTimeoutsRemaining}
         </span>
       </div>
+      {fieldSide && <p className="text-xs text-muted">{fieldSide}</p>}
       {game.startingGenderRatio && (
         <GenderCycle
           startA={game.startingGenderRatio}
@@ -78,6 +80,32 @@ function Header({ live }: { live: LiveGame }) {
       )}
     </div>
   );
+}
+
+// Which side of the field the team is on, relative to home, only worth
+// calling out right when it's newly true: point 1 (as resolved at the flip)
+// and the first point after halftime, when teams swap ends and the side
+// that was true all first half flips to its opposite. Every other point it's
+// unchanged from the point before, so saying nothing is the right default.
+function fieldSideLabel(live: LiveGame): string | null {
+  const { game, state, points } = live;
+  if (!game.fieldSide) return null;
+
+  const isFirstPoint = state.currentPointNumber === 1;
+  const existing = points[state.currentPointNumber - 1];
+  const isFirstAfterHalf = existing
+    ? existing.isFirstAfterHalftime
+    : state.halftimeReached && !points.some((p) => p.isFirstAfterHalftime);
+  if (!isFirstPoint && !isFirstAfterHalf) return null;
+
+  // The stored fieldSide is fixed at the flip (first-half assignment) — after
+  // halftime, teams have swapped ends, so the *current* side is the opposite.
+  const side = isFirstAfterHalf
+    ? game.fieldSide === "left"
+      ? "right"
+      : "left"
+    : game.fieldSide;
+  return `${side === "left" ? "Left" : "Right"} side facing the field standing from home`;
 }
 
 // ABBA gender-match state indicator: the current point's slot plus the upcoming
@@ -167,7 +195,7 @@ function LineBuilder({
   live: LiveGame;
   seed: string[] | null;
 }) {
-  const { game, roster, state, savedLines, actions } = live;
+  const { game, roster, state, savedLines, points, actions } = live;
   const eligible = useMemo(
     () => roster.filter((p) => !p.injured && isRosterActive(p)),
     [roster],
@@ -208,6 +236,20 @@ function LineBuilder({
       gaps[p.playerId] = completed - (state.lastPlayedPoint[p.playerId] ?? 0);
     }
     return gaps;
+  }, [roster, state.lastPlayedPoint, state.currentPointNumber]);
+
+  // Who started the immediately preceding point — shown as "Just played"
+  // instead of a numeric gap. Checked against lastPlayedPoint directly
+  // (rather than benchGap === 0) so a player who's never started a point
+  // doesn't false-positive at point 1, where everyone's gap defaults to 0.
+  const justPlayedIds = useMemo(() => {
+    const completed = state.currentPointNumber - 1;
+    if (completed <= 0) return new Set<string>();
+    return new Set(
+      roster
+        .filter((p) => state.lastPlayedPoint[p.playerId] === completed)
+        .map((p) => p.playerId),
+    );
   }, [roster, state.lastPlayedPoint, state.currentPointNumber]);
 
   // Selectable slots per gender: the ratio in Mixed, otherwise up to a full line.
@@ -267,6 +309,18 @@ function LineBuilder({
     .filter((p) => selected.includes(p.playerId))
     .map((p) => ({ id: p.playerId, genderMatch: p.genderMatch, role: p.role }));
 
+  // Handler/Cutter/Both counts among the current selection, so the coach can
+  // see the line's shape at a glance alongside the gender-ratio counter.
+  const roleCounts = selectedPlayers.reduce(
+    (acc, p) => {
+      if (p.role === "handler") acc.handler++;
+      else if (p.role === "cutter") acc.cutter++;
+      else acc.both++;
+      return acc;
+    },
+    { handler: 0, cutter: 0, both: 0 },
+  );
+
   const result = validateLine({
     division: game.startingGenderRatio ? "mixed" : "open",
     requiredRatio: state.genderRatio,
@@ -280,11 +334,27 @@ function LineBuilder({
 
   // Quick lines that fit this point: full lines whose composition matches the ratio
   // exactly, plus partial pods whose composition fits under the point's gender caps.
+  // Counts every saved player, including anyone currently injured — used for the
+  // chip's displayed "4M/3W" composition, which describes the pod as saved.
   const composition = (playerIds: string[]) => {
     let mmp = 0;
     let wmp = 0;
     for (const id of playerIds) {
       const g = allById.get(id)?.genderMatch;
+      if (g === "MMP") mmp++;
+      else if (g === "WMP") wmp++;
+    }
+    return { mmp, wmp };
+  };
+  // Same tally, but skipping anyone currently injured/inactive — used to decide
+  // whether a pod fits this point's caps. A pod isn't hidden just because one of
+  // its players is out; mergeWithCaps below already skips them when applying, so
+  // whether it *fits* should be judged by who'd actually get added.
+  const eligibleComposition = (playerIds: string[]) => {
+    let mmp = 0;
+    let wmp = 0;
+    for (const id of playerIds) {
+      const g = byId.get(id)?.genderMatch;
       if (g === "MMP") mmp++;
       else if (g === "WMP") wmp++;
     }
@@ -303,18 +373,38 @@ function LineBuilder({
   // For a full 7 this forces an exact ratio match; for a pod it just has to fit.
   const quickLines = savedLines
     .map((line) => ({ line, ...composition(line.playerIds) }))
-    .filter(
-      (x) =>
-        x.line.playerIds.length >= 1 &&
-        x.line.playerIds.length <= 7 &&
-        x.mmp <= maxMMP &&
-        x.wmp <= maxWMP,
-    )
+    .filter((x) => {
+      if (x.line.playerIds.length < 1 || x.line.playerIds.length > 7) return false;
+      const elig = eligibleComposition(x.line.playerIds);
+      return elig.mmp <= maxMMP && elig.wmp <= maxWMP;
+    })
     .sort((a, b) => {
       const side = sideMatchRank(a.line.side) - sideMatchRank(b.line.side);
       if (side !== 0) return side;
       return b.line.playerIds.length - a.line.playerIds.length;
     });
+
+  // The exact saved line/pod that was on the field for the immediately
+  // preceding point (if any exactly matches it), labeled "Just played" in the
+  // quick-lines bar below. That label tracks any surviving overlap with the
+  // current selection rather than an exact-match snapshot, so it persists
+  // through swapping a player or two while building the next line, but drops
+  // once nothing from it remains selected — whether because the coach
+  // individually swapped out the whole line or re-tapped the pod chip to
+  // clear it outright (both just mean "selected" no longer overlaps it).
+  const previousLineup = points.length > 0 ? points[points.length - 1]!.lineup : null;
+  const justPlayedLineId = (() => {
+    if (!previousLineup) return null;
+    const prevSet = new Set(previousLineup);
+    const match = savedLines.find(
+      (l) => l.playerIds.length === prevSet.size && l.playerIds.every((id) => prevSet.has(id)),
+    );
+    return match?.id ?? null;
+  })();
+  const justPlayedId =
+    justPlayedLineId !== null && previousLineup!.some((id) => selected.includes(id))
+      ? justPlayedLineId
+      : null;
 
   // Add players up to the caps, deduping and skipping ineligible ones.
   const mergeWithCaps = (base: string[], incoming: string[]) => {
@@ -415,10 +505,22 @@ function LineBuilder({
           </button>
         )}
       </div>
+      <div className="flex items-center gap-1.5 text-xs">
+        <span className={`rounded px-1 font-semibold ${ROLE_BADGE_COLOR.handler}`}>
+          H {roleCounts.handler}
+        </span>
+        <span className={`rounded px-1 font-semibold ${ROLE_BADGE_COLOR.cutter}`}>
+          C {roleCounts.cutter}
+        </span>
+        <span className={`rounded px-1 font-semibold ${ROLE_BADGE_COLOR.both}`}>
+          H/C {roleCounts.both}
+        </span>
+      </div>
 
       <SavedLinesBar
         lines={quickLines}
         appliedIds={appliedLineIds}
+        justPlayedId={justPlayedId}
         ratioLabel={need ? `${maxMMP}M / ${maxWMP}W` : "any 7"}
         onApply={applyLine}
         note={applyNote}
@@ -437,12 +539,12 @@ function LineBuilder({
           onClick={() => setSortMode("roster")}
         />
         <SortToggleButton
-          label="Least recently played"
+          label="Least recent"
           active={sortMode === "recency"}
           onClick={() => setSortMode("recency")}
         />
         <SortToggleButton
-          label="Least points played"
+          label="Least points"
           active={sortMode === "playtime"}
           onClick={() => setSortMode("playtime")}
         />
@@ -458,6 +560,7 @@ function LineBuilder({
         slotLabels={slotLabels}
         pointsPlayed={state.pointsPlayed}
         benchGap={benchGap}
+        justPlayedIds={justPlayedIds}
         sortMode={sortMode}
         mmpFull={mmpFull}
         wmpFull={wmpFull}
@@ -473,6 +576,7 @@ function LineBuilder({
         slotLabels={slotLabels}
         pointsPlayed={state.pointsPlayed}
         benchGap={benchGap}
+        justPlayedIds={justPlayedIds}
         sortMode={sortMode}
         mmpFull={mmpFull}
         wmpFull={wmpFull}
@@ -571,6 +675,7 @@ function ODAccordion({
   slotLabels,
   pointsPlayed,
   benchGap,
+  justPlayedIds,
   sortMode,
   mmpFull,
   wmpFull,
@@ -585,6 +690,7 @@ function ODAccordion({
   slotLabels: Record<string, string>;
   pointsPlayed: Record<string, number>;
   benchGap: Record<string, number>;
+  justPlayedIds: Set<string>;
   sortMode: SortMode;
   mmpFull: boolean;
   wmpFull: boolean;
@@ -607,6 +713,7 @@ function ODAccordion({
           slotLabels={slotLabels}
           pointsPlayed={pointsPlayed}
           benchGap={benchGap}
+          justPlayedIds={justPlayedIds}
           sortMode={sortMode}
           mmpFull={mmpFull}
           wmpFull={wmpFull}
@@ -647,6 +754,7 @@ function GenderColumns({
   slotLabels,
   pointsPlayed,
   benchGap,
+  justPlayedIds,
   sortMode,
   mmpFull,
   wmpFull,
@@ -657,6 +765,7 @@ function GenderColumns({
   slotLabels: Record<string, string>;
   pointsPlayed: Record<string, number>;
   benchGap: Record<string, number>;
+  justPlayedIds: Set<string>;
   sortMode: SortMode;
   mmpFull: boolean;
   wmpFull: boolean;
@@ -677,6 +786,7 @@ function GenderColumns({
         slotLabels={slotLabels}
         pointsPlayed={pointsPlayed}
         benchGap={benchGap}
+        justPlayedIds={justPlayedIds}
         columnFull={mmpFull}
         onToggle={onToggle}
       />
@@ -687,6 +797,7 @@ function GenderColumns({
         slotLabels={slotLabels}
         pointsPlayed={pointsPlayed}
         benchGap={benchGap}
+        justPlayedIds={justPlayedIds}
         columnFull={wmpFull}
         onToggle={onToggle}
       />
@@ -701,6 +812,7 @@ function RosterColumn({
   slotLabels,
   pointsPlayed,
   benchGap,
+  justPlayedIds,
   columnFull,
   onToggle,
 }: {
@@ -710,6 +822,7 @@ function RosterColumn({
   slotLabels: Record<string, string>;
   pointsPlayed: Record<string, number>;
   benchGap: Record<string, number>;
+  justPlayedIds: Set<string>;
   columnFull: boolean;
   onToggle: (id: string) => void;
 }) {
@@ -756,7 +869,9 @@ function RosterColumn({
                     className="text-[10px]"
                     style={{ color: benchGapColor(benchGap[p.playerId] ?? 0) }}
                   >
-                    Last played {benchGap[p.playerId] ?? 0} points ago
+                    {justPlayedIds.has(p.playerId)
+                      ? "Just played"
+                      : `Last played ${benchGap[p.playerId] ?? 0} points ago`}
                   </span>
                 </span>
                 <span className="shrink-0 text-xs text-faint">
@@ -864,12 +979,14 @@ interface QuickLine {
 function SavedLinesBar({
   lines,
   appliedIds,
+  justPlayedId,
   ratioLabel,
   onApply,
   note,
 }: {
   lines: QuickLine[];
   appliedIds: Set<string>;
+  justPlayedId: string | null;
   ratioLabel: string;
   onApply: (line: SavedLine) => void;
   note: string | null;
@@ -897,7 +1014,7 @@ function SavedLinesBar({
             return (
               <span
                 key={line.id}
-                className={`flex items-center gap-1 rounded-full border py-1 pl-3 pr-3 text-sm ${tone} ${
+                className={`flex flex-col items-start gap-0.5 rounded-lg border py-1 pl-3 pr-3 text-sm ${tone} ${
                   isApplied ? "ring-2 ring-offset-1 ring-offset-surface ring-current" : ""
                 }`}
               >
@@ -916,6 +1033,9 @@ function SavedLinesBar({
                     {mmp}M/{wmp}W · {line.useCount ?? 0}×
                   </span>
                 </button>
+                {line.id === justPlayedId && (
+                  <span className="text-[10px] font-medium opacity-80">Just played</span>
+                )}
               </span>
             );
           })}
