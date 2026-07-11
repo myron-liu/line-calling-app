@@ -93,6 +93,7 @@ export function deriveHalftimeReached(
   points: Point[],
 ): boolean {
   if (points.some((p) => p.isFirstAfterHalftime)) return true;
+  if (game.halfScore === null) return false;
   const { our, their } = scoreOf(points);
   return our >= game.halfScore || their >= game.halfScore;
 }
@@ -120,7 +121,8 @@ export function deriveLiveGameState(
   meta: GameMeta,
 ): LiveGameState {
   const { our, their } = scoreOf(points);
-  const capReached = our >= game.gameCap || their >= game.gameCap;
+  const capReached =
+    game.gameCap !== null && (our >= game.gameCap || their >= game.gameCap);
   const inProgress = points.find((p) => p.result === undefined);
 
   let phase: LiveGameState["phase"];
@@ -214,7 +216,8 @@ export function recordResult(
 
   let meta = state.meta;
   const { our, their } = scoreOf(points);
-  const reachedHalf = our === game.halfScore || their === game.halfScore;
+  const reachedHalf =
+    game.halfScore !== null && (our === game.halfScore || their === game.halfScore);
   if (!meta.halftimeReached && reachedHalf) {
     meta = {
       ...meta,

@@ -29,6 +29,13 @@
       "when": 1783499583890,
       "tag": "0003_add_game_date",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1783760220560,
+      "tag": "0004_red_chat",
+      "breakpoints": true
     }
   ]
 }

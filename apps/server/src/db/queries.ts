@@ -11,7 +11,7 @@ import { deriveLiveGameState } from "@shared/game-rules";
 import type {
   Division,
   Game,
-  GameCap,
+  GameCapMode,
   GameMeta,
   GameStatus,
   GenderMatch,
@@ -538,8 +538,8 @@ export interface CreateGameInput {
   teamId: string;
   tournamentId?: string;
   opponentName: string;
-  gameCap: GameCap;
-  halfScore: number;
+  gameCap: GameCapMode;
+  halfScore: number | null;
   timeoutsPerHalf: number;
   /**
    * Unread while the game sits in "scheduled" status — the real value is
@@ -889,7 +889,7 @@ function toGame(row: typeof games.$inferSelect): Game {
     teamId: row.teamId,
     tournamentId: row.tournamentId ?? undefined,
     opponentName: row.opponentName,
-    gameCap: row.gameCap as GameCap,
+    gameCap: row.gameCap as GameCapMode,
     halfScore: row.halfScore,
     timeoutsPerHalf: row.timeoutsPerHalf,
     startingGenderRatio: (row.startingGenderRatio as GenderRatio) ?? undefined,

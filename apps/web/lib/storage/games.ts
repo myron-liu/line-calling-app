@@ -4,7 +4,7 @@
 // so the live caller can run entirely offline from that point on — see
 // apps/web/lib/storage/gameLog.ts and lib/game/useLiveGame.ts.
 
-import type { Game, GameCap, GenderRatio, OD, Player } from "@shared/game-rules";
+import type { Game, GameCapMode, GenderRatio, OD, Player } from "@shared/game-rules";
 import { halfScoreForCap } from "@shared/game-rules";
 import { api } from "../api/client";
 import {
@@ -48,7 +48,7 @@ export interface CreateGameInput {
   teamId: string;
   tournamentId?: string;
   opponentName: string;
-  gameCap: GameCap;
+  gameCap: GameCapMode;
   timeoutsPerHalf: number;
   /** Set for Mixed only. */
   startingGenderRatio?: GenderRatio;

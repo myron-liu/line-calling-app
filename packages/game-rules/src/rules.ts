@@ -2,7 +2,7 @@
 // No I/O, no dates, no randomness: every function is a pure function of its inputs
 // so it can be exhaustively unit-tested and run identically on client and server.
 
-import type { GenderRatio, OD, Game, Point } from "./types";
+import type { GameCapMode, GenderRatio, OD, Game, Point } from "./types";
 
 // ── Gender ratio (ABBA) — §5 ─────────────────────────────────────────────────
 
@@ -107,7 +107,8 @@ export function lastPlayedPoint(points: Point[]): Record<string, number> {
 
 // ── Half score derivation — §4.2 ─────────────────────────────────────────────
 
-/** 7 for a 13-cap, 8 for a 15-cap. */
-export function halfScoreForCap(cap: 13 | 15): number {
-  return cap === 13 ? 7 : 8;
+/** 7 for a 13-cap, 8 for a 15-cap, null for a time-cap game (no auto-halftime
+ *  score threshold — see GameCapMode). */
+export function halfScoreForCap(cap: GameCapMode): number | null {
+  return cap === null ? null : cap === 13 ? 7 : 8;
 }

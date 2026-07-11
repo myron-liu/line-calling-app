@@ -45,7 +45,8 @@ const genderMatch = z.enum(["MMP", "WMP"]);
 const odPreference = z.enum(["O", "D", "both"]);
 const od = z.enum(["O", "D"]);
 const genderRatio = z.enum(["4MMP_3WMP", "4WMP_3MMP"]);
-const gameCap = z.union([z.literal(13), z.literal(15)]);
+// null = a "time cap" game (no score cap; only a manual End game completes it).
+const gameCap = z.union([z.literal(13), z.literal(15), z.null()]);
 const lineColor = z.enum(["red", "green", "blue", "yellow", "black", "purple"]);
 const fieldSide = z.enum(["left", "right"]);
 const teamColor = z.enum(["light", "dark"]);
@@ -326,7 +327,7 @@ export const routes: Route[] = [
         tournamentId: z.string().optional(),
         opponentName: z.string().min(1),
         gameCap,
-        halfScore: z.number(),
+        halfScore: z.number().nullable(),
         timeoutsPerHalf: z.number(),
         startingOD: od.optional(),
         startingGenderRatio: genderRatio.optional(),

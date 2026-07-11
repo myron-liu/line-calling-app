@@ -12,6 +12,10 @@ export type GenderMatch = "MMP" | "WMP";
 export type GenderRatio = "4MMP_3WMP" | "4WMP_3MMP";
 export type OD = "O" | "D";
 export type GameCap = 13 | 15;
+/** Score cap for a normal capped game, or null for a "time cap" game — no
+ *  score ends it automatically; it only ends when the coach presses End
+ *  game. Halftime in that mode is manual-only too (see Game.halfScore). */
+export type GameCapMode = GameCap | null;
 
 /** A player's preferred side of the disc; "both" means no strong preference. */
 export type ODPreference = OD | "both";
@@ -110,9 +114,11 @@ export interface Game {
   /** Undefined for a standalone/individual game not tied to a tournament. */
   tournamentId?: string;
   opponentName: string;
-  gameCap: GameCap;
-  /** Derived: 7 if cap 13, 8 if cap 15. Stored for convenience. */
-  halfScore: number;
+  /** null means a "time cap" game — see GameCapMode. */
+  gameCap: GameCapMode;
+  /** Derived: 7 if cap 13, 8 if cap 15, null for a time-cap game (halftime
+   *  is then manual-only — there's no score threshold to auto-trigger it). */
+  halfScore: number | null;
   timeoutsPerHalf: number;
 
   /** Mixed only. Null/ignored for Open & Women. */

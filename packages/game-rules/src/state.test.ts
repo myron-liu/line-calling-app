@@ -274,6 +274,35 @@ describe("game completion", () => {
       "awaiting_line",
     );
   });
+
+  test("time-cap game (gameCap/halfScore null) never auto-completes or auto-halftimes", () => {
+    const timeCapGame: Game = { ...game, gameCap: null, halfScore: null };
+    let s: GameLogState = { points: [], meta: initialMeta(timeCapGame) };
+    for (let i = 0; i < 20; i++) {
+      const lineup = Array.from({ length: 7 }, (_, j) => `p${i}_${j}`);
+      s = recordResult(
+        timeCapGame,
+        confirmLine(timeCapGame, s, lineup, `pt-${i + 1}`),
+        "us",
+      );
+    }
+    const live = deriveLiveGameState(timeCapGame, s.points, s.meta);
+    expect(live.ourScore).toBe(20);
+    expect(live.phase).toBe("awaiting_line"); // no cap to reach, so still going
+    expect(s.meta.halftimeReached).toBe(false); // no halfScore to auto-trigger it
+
+    // Manual halftime still works, and undoing it still works.
+    const halved = callHalftime(timeCapGame, s);
+    expect(halved.meta.halftimeReached).toBe(true);
+    const undoneHalf = undoLastPoint(timeCapGame, halved);
+    expect(undoneHalf.meta.halftimeReached).toBe(false);
+
+    // Only a manual end actually completes it.
+    const ended = endGame(s);
+    expect(deriveLiveGameState(timeCapGame, ended.points, ended.meta).phase).toBe(
+      "completed",
+    );
+  });
 });
 
 describe("edit line history", () => {

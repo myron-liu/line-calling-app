@@ -245,7 +245,7 @@ function Recap({ live }: { live: LiveGame }) {
       <p className="text-sm text-muted">
         {state.ourScore > state.theirScore ? "Win" : state.ourScore < state.theirScore ? "Loss" : "Tie"}
         {" · "}
-        {game.gameCap}-cap
+        {game.gameCap === null ? "time cap" : `${game.gameCap}-cap`}
       </p>
 
       {canUndo && (

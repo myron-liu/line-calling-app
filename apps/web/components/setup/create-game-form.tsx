@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { Division, GameCap, Player } from "@shared/game-rules";
+import type { Division, GameCapMode, Player } from "@shared/game-rules";
 import { createGame, rosterSnapshot } from "@/lib/storage/games";
 
 // Create-game form, shared by individual games (pick a subset of the team roster)
@@ -36,7 +36,7 @@ export function CreateGameForm({
 
   const [open, setOpen] = useState(false);
   const [opponent, setOpponent] = useState("");
-  const [cap, setCap] = useState<GameCap>(13);
+  const [cap, setCap] = useState<GameCapMode>(13);
   const [timeouts, setTimeouts] = useState(2);
   const [fieldNumber, setFieldNumber] = useState("");
   const [gameDate, setGameDate] = useState(tournamentStartDate ?? "");
@@ -129,12 +129,15 @@ export function CreateGameForm({
         <label className="flex flex-col gap-1">
           <span className="text-muted">Game cap</span>
           <select
-            value={cap}
-            onChange={(e) => setCap(Number(e.target.value) as GameCap)}
+            value={cap === null ? "time" : cap}
+            onChange={(e) =>
+              setCap(e.target.value === "time" ? null : (Number(e.target.value) as 13 | 15))
+            }
             className="rounded border border-line-strong px-3 py-2"
           >
             <option value={13}>13 (half 7)</option>
             <option value={15}>15 (half 8)</option>
+            <option value="time">Time cap (no score limit)</option>
           </select>
         </label>
         <label className="flex flex-col gap-1">

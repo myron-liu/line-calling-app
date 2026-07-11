@@ -101,8 +101,10 @@ export const games = pgTable("games", {
     onDelete: "set null",
   }),
   opponentName: text("opponent_name").notNull(),
-  gameCap: integer("game_cap").notNull(), // 13 | 15
-  halfScore: integer("half_score").notNull(),
+  // 13 | 15, or null for a "time cap" game — no score ends it automatically,
+  // only a manual End game does (see GameCapMode in @shared/game-rules).
+  gameCap: integer("game_cap"),
+  halfScore: integer("half_score"), // null alongside a null gameCap
   timeoutsPerHalf: integer("timeouts_per_half").notNull(),
   startingGenderRatio: text("starting_gender_ratio"), // "4MMP_3WMP" | "4WMP_3MMP" | null
   // "O" | "D" — a real value once in_progress; while status is "scheduled"

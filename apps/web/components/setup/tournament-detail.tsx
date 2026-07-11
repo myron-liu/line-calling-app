@@ -180,7 +180,7 @@ export function TournamentDetail({ tournamentId }: { tournamentId: string }) {
           <p className="text-sm text-muted">
             No players on the team roster yet.
           </p>
-        ) : (
+        ) : isMixed ? (
           <>
             <CheckInAccordion
               label="MMP"
@@ -201,6 +201,14 @@ export function TournamentDetail({ tournamentId }: { tournamentId: string }) {
               onSetInjured={setLocalInjured}
             />
           </>
+        ) : (
+          <FlatCheckInList
+            players={sortRoster(players)}
+            presentIds={presentIds}
+            injuredIds={injuredIds}
+            onTogglePresent={setLocalPresent}
+            onSetInjured={setLocalInjured}
+          />
         )}
       </div>
 
@@ -254,6 +262,73 @@ const CHECKIN_TONE = {
   },
 } as const;
 
+type CheckInRowProps = {
+  players: Player[];
+  presentIds: Set<string>;
+  injuredIds: Set<string>;
+  onTogglePresent: (playerId: string, present: boolean) => void;
+  onSetInjured: (playerId: string, injured: boolean) => void;
+};
+
+function CheckInRows({
+  players,
+  presentIds,
+  injuredIds,
+  onTogglePresent,
+  onSetInjured,
+}: CheckInRowProps) {
+  return (
+    <>
+      {players.map((p) => {
+        const present = presentIds.has(p.id);
+        const injured = injuredIds.has(p.id);
+        return (
+          <li
+            key={p.id}
+            className="flex items-center justify-between rounded-md border border-line px-2.5 py-1.5 text-sm"
+          >
+            <label className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={present}
+                onChange={(e) => onTogglePresent(p.id, e.target.checked)}
+              />
+              <span className={present ? "" : "text-faint"}>
+                {p.nickname || p.name}
+              </span>
+            </label>
+            {present && (
+              <select
+                value={injured ? "injured" : "healthy"}
+                onChange={(e) => onSetInjured(p.id, e.target.value === "injured")}
+                className={`rounded border px-1.5 py-0.5 text-xs ${
+                  injured
+                    ? "border-amber-300 bg-amber-100 text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/20 dark:text-amber-200"
+                    : "border-line-strong text-faint"
+                }`}
+              >
+                <option value="healthy">Healthy</option>
+                <option value="injured">Injured</option>
+              </select>
+            )}
+          </li>
+        );
+      })}
+    </>
+  );
+}
+
+// Single-division tournament (Open/Women): every player is the same
+// genderMatch by definition, so the MMP/WMP split is a redundant grouping —
+// just one flat list, no accordion chrome.
+function FlatCheckInList(props: CheckInRowProps) {
+  return (
+    <ul className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+      <CheckInRows {...props} />
+    </ul>
+  );
+}
+
 function CheckInAccordion({
   label,
   tone,
@@ -262,14 +337,9 @@ function CheckInAccordion({
   injuredIds,
   onTogglePresent,
   onSetInjured,
-}: {
+}: CheckInRowProps & {
   label: string;
   tone: keyof typeof CHECKIN_TONE;
-  players: Player[];
-  presentIds: Set<string>;
-  injuredIds: Set<string>;
-  onTogglePresent: (playerId: string, present: boolean) => void;
-  onSetInjured: (playerId: string, injured: boolean) => void;
 }) {
   const t = CHECKIN_TONE[tone];
   const presentCount = players.filter((p) => presentIds.has(p.id)).length;
@@ -282,41 +352,13 @@ function CheckInAccordion({
         </span>
       </summary>
       <ul className="mt-2 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
-        {players.map((p) => {
-          const present = presentIds.has(p.id);
-          const injured = injuredIds.has(p.id);
-          return (
-            <li
-              key={p.id}
-              className="flex items-center justify-between rounded-md border border-line px-2.5 py-1.5 text-sm"
-            >
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={present}
-                  onChange={(e) => onTogglePresent(p.id, e.target.checked)}
-                />
-                <span className={present ? "" : "text-faint"}>
-                  {p.nickname || p.name}
-                </span>
-              </label>
-              {present && (
-                <select
-                  value={injured ? "injured" : "healthy"}
-                  onChange={(e) => onSetInjured(p.id, e.target.value === "injured")}
-                  className={`rounded border px-1.5 py-0.5 text-xs ${
-                    injured
-                      ? "border-amber-300 bg-amber-100 text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/20 dark:text-amber-200"
-                      : "border-line-strong text-faint"
-                  }`}
-                >
-                  <option value="healthy">Healthy</option>
-                  <option value="injured">Injured</option>
-                </select>
-              )}
-            </li>
-          );
-        })}
+        <CheckInRows
+          players={players}
+          presentIds={presentIds}
+          injuredIds={injuredIds}
+          onTogglePresent={onTogglePresent}
+          onSetInjured={onSetInjured}
+        />
       </ul>
     </details>
   );

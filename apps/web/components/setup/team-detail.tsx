@@ -153,13 +153,20 @@ function Roster({
 
   const conflict = name.trim() ? playerConflict(players, { name, nickname }) : null;
 
+  // Single-division teams don't need a gender-match choice at all — every
+  // player on an Open roster is MMP, every player on a Women's roster is
+  // WMP, by definition. Only Mixed (which needs both to fill the ratio)
+  // shows the picker.
+  const fixedGenderMatch: GenderMatch | null =
+    division === "open" ? "MMP" : division === "women" ? "WMP" : null;
+
   const add = async () => {
     if (!name.trim() || conflict) return;
     try {
       await createPlayer(teamId, {
         name: name.trim(),
         nickname: nickname.trim() || undefined,
-        genderMatch,
+        genderMatch: fixedGenderMatch ?? genderMatch,
         role,
         odPreference,
         jerseyNumber: jersey ? Number(jersey) : undefined,
@@ -210,20 +217,34 @@ function Roster({
             <FilterChip label="D" active={odFilter === "D"} onClick={() => setOdFilter("D")} />
           </div>
 
-          <RosterAccordion
-            label="MMP"
-            tone="sky"
-            players={mmpPlayers}
-            onEdit={setEditing}
-            onDelete={setDeleting}
-          />
-          <RosterAccordion
-            label="WMP"
-            tone="rose"
-            players={wmpPlayers}
-            onEdit={setEditing}
-            onDelete={setDeleting}
-          />
+          {division === "mixed" ? (
+            <>
+              <RosterAccordion
+                label="MMP"
+                tone="sky"
+                players={mmpPlayers}
+                onEdit={setEditing}
+                onDelete={setDeleting}
+              />
+              <RosterAccordion
+                label="WMP"
+                tone="rose"
+                players={wmpPlayers}
+                onEdit={setEditing}
+                onDelete={setDeleting}
+              />
+            </>
+          ) : (
+            // Single-division team: every player is the same genderMatch by
+            // definition, so the MMP/WMP split is a redundant grouping — just
+            // one flat list, no accordion chrome.
+            <FlatRosterList
+              players={division === "open" ? mmpPlayers : wmpPlayers}
+              tone={division === "open" ? "sky" : "rose"}
+              onEdit={setEditing}
+              onDelete={setDeleting}
+            />
+          )}
         </>
       )}
 
@@ -240,14 +261,16 @@ function Roster({
           placeholder="Nickname"
           className="h-9 min-w-[7rem] flex-1 rounded border border-line-strong px-2"
         />
-        <select
-          value={genderMatch}
-          onChange={(e) => setGenderMatch(e.target.value as GenderMatch)}
-          className="h-9 rounded border border-line-strong px-2"
-        >
-          <option value="MMP">MMP</option>
-          <option value="WMP">WMP</option>
-        </select>
+        {!fixedGenderMatch && (
+          <select
+            value={genderMatch}
+            onChange={(e) => setGenderMatch(e.target.value as GenderMatch)}
+            className="h-9 rounded border border-line-strong px-2"
+          >
+            <option value="MMP">MMP</option>
+            <option value="WMP">WMP</option>
+          </select>
+        )}
         <select
           value={role}
           onChange={(e) => setRole(e.target.value as Role)}
@@ -292,6 +315,7 @@ function Roster({
         <EditPlayerModal
           players={players}
           player={editing}
+          division={division}
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null);
@@ -360,6 +384,33 @@ const ROSTER_TONE = {
     text: "text-rose-600 dark:text-rose-400",
   },
 } as const;
+
+function FlatRosterList({
+  players,
+  tone,
+  onEdit,
+  onDelete,
+}: {
+  players: Player[];
+  tone: keyof typeof ROSTER_TONE;
+  onEdit: (p: Player) => void;
+  onDelete: (p: Player) => void;
+}) {
+  const t = ROSTER_TONE[tone];
+  return (
+    <ul className="grid grid-cols-2 gap-1.5">
+      {players.length === 0 ? (
+        <li className="col-span-2 text-[13px] text-faint">
+          No players match the current filters.
+        </li>
+      ) : (
+        players.map((p) => (
+          <RosterRow key={p.id} p={p} tone={t} onEdit={onEdit} onDelete={onDelete} />
+        ))
+      )}
+    </ul>
+  );
+}
 
 function RosterAccordion({
   label,
@@ -461,11 +512,13 @@ function EditIcon() {
 function EditPlayerModal({
   players,
   player,
+  division,
   onClose,
   onSaved,
 }: {
   players: Player[];
   player: Player;
+  division: Division;
   onClose: () => void;
   onSaved: () => void;
 }) {
@@ -478,6 +531,11 @@ function EditPlayerModal({
   );
   const [error, setError] = useState<string | null>(null);
 
+  // Same single-division rule as the roster-addition form: Open/Women teams
+  // don't get a gender-match choice at all.
+  const fixedGenderMatch: GenderMatch | null =
+    division === "open" ? "MMP" : division === "women" ? "WMP" : null;
+
   const conflict = name.trim()
     ? playerConflict(players, { name, nickname }, player.id)
     : "Name is required.";
@@ -487,7 +545,7 @@ function EditPlayerModal({
     const patch: Partial<PlayerInput> = {
       name: name.trim(),
       nickname: nickname.trim() || undefined,
-      genderMatch,
+      genderMatch: fixedGenderMatch ?? genderMatch,
       role,
       odPreference,
     };
@@ -519,17 +577,19 @@ function EditPlayerModal({
             className="h-9 rounded border border-line-strong px-2"
           />
         </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-muted">Gender match</span>
-          <select
-            value={genderMatch}
-            onChange={(e) => setGenderMatch(e.target.value as GenderMatch)}
-            className="h-9 rounded border border-line-strong px-2"
-          >
-            <option value="MMP">MMP</option>
-            <option value="WMP">WMP</option>
-          </select>
-        </label>
+        {!fixedGenderMatch && (
+          <label className="flex flex-col gap-1">
+            <span className="text-muted">Gender match</span>
+            <select
+              value={genderMatch}
+              onChange={(e) => setGenderMatch(e.target.value as GenderMatch)}
+              className="h-9 rounded border border-line-strong px-2"
+            >
+              <option value="MMP">MMP</option>
+              <option value="WMP">WMP</option>
+            </select>
+          </label>
+        )}
         <label className="flex flex-col gap-1">
           <span className="text-muted">Role</span>
           <select
@@ -729,7 +789,8 @@ export function GameList({
               <p className="truncate font-medium">vs {g.opponentName}</p>
               <p className="flex flex-wrap items-center gap-1.5 text-xs text-faint">
                 <span>
-                  {statusLabel[g.status]} · cap {g.gameCap}
+                  {statusLabel[g.status]} ·{" "}
+                  {g.gameCap === null ? "time cap" : `cap ${g.gameCap}`}
                 </span>
                 {g.status === "in_progress" && g.currentScore && (
                   <span className="font-semibold tabular-nums text-fg">
