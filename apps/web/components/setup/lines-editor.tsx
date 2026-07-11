@@ -229,18 +229,46 @@ export function LinesEditor({ tournamentId }: { tournamentId: string }) {
           <p className="text-sm text-muted">No players on the team roster yet.</p>
         ) : (
           <div className="grid grid-cols-2 gap-3">
-            <PlayerColumn
-              gender="MMP"
-              players={sortRoster(players.filter((p) => p.genderMatch === "MMP"))}
-              selected={selected}
-              onToggle={toggle}
-            />
-            <PlayerColumn
-              gender="WMP"
-              players={sortRoster(players.filter((p) => p.genderMatch === "WMP"))}
-              selected={selected}
-              onToggle={toggle}
-            />
+            {tournament.division === "mixed" ? (
+              <>
+                <PlayerColumn
+                  label="MMP"
+                  tone="sky"
+                  players={sortRoster(players.filter((p) => p.genderMatch === "MMP"))}
+                  selected={selected}
+                  onToggle={toggle}
+                />
+                <PlayerColumn
+                  label="WMP"
+                  tone="rose"
+                  players={sortRoster(players.filter((p) => p.genderMatch === "WMP"))}
+                  selected={selected}
+                  onToggle={toggle}
+                />
+              </>
+            ) : (
+              (() => {
+                const sorted = sortRoster(players);
+                const mid = Math.ceil(sorted.length / 2);
+                const tone = tournament.division === "open" ? "sky" : "rose";
+                return (
+                  <>
+                    <PlayerColumn
+                      tone={tone}
+                      players={sorted.slice(0, mid)}
+                      selected={selected}
+                      onToggle={toggle}
+                    />
+                    <PlayerColumn
+                      tone={tone}
+                      players={sorted.slice(mid)}
+                      selected={selected}
+                      onToggle={toggle}
+                    />
+                  </>
+                );
+              })()
+            )}
           </div>
         )}
 
@@ -376,34 +404,41 @@ function ToggleButton({
   );
 }
 
+const COLUMN_TONE = {
+  sky: {
+    header: "text-sky-600 dark:text-sky-400",
+    idle: "border-sky-200 dark:border-sky-500/30",
+    selected: "border-sky-500 bg-sky-50 dark:bg-sky-500/10 font-medium",
+  },
+  rose: {
+    header: "text-rose-600 dark:text-rose-400",
+    idle: "border-rose-200 dark:border-rose-500/30",
+    selected: "border-rose-500 bg-rose-50 dark:bg-rose-500/10 font-medium",
+  },
+} as const;
+
 function PlayerColumn({
-  gender,
+  label,
+  tone,
   players,
   selected,
   onToggle,
 }: {
-  gender: "MMP" | "WMP";
+  /** Omitted for a single-division team, where MMP/WMP is redundant. */
+  label?: string;
+  tone: keyof typeof COLUMN_TONE;
   players: Player[];
   selected: string[];
   onToggle: (id: string) => void;
 }) {
-  const tone =
-    gender === "MMP"
-      ? {
-          header: "text-sky-600 dark:text-sky-400",
-          idle: "border-sky-200 dark:border-sky-500/30",
-          selected: "border-sky-500 bg-sky-50 dark:bg-sky-500/10 font-medium",
-        }
-      : {
-          header: "text-rose-600 dark:text-rose-400",
-          idle: "border-rose-200 dark:border-rose-500/30",
-          selected: "border-rose-500 bg-rose-50 dark:bg-rose-500/10 font-medium",
-        };
+  const t = COLUMN_TONE[tone];
   return (
     <div>
-      <p className={`mb-1 text-xs font-semibold uppercase tracking-wide ${tone.header}`}>
-        {gender}
-      </p>
+      {label && (
+        <p className={`mb-1 text-xs font-semibold uppercase tracking-wide ${t.header}`}>
+          {label}
+        </p>
+      )}
       <ul className="space-y-1">
         {players.map((p) => {
           const isSel = selected.includes(p.id);
@@ -412,7 +447,7 @@ function PlayerColumn({
               <button
                 onClick={() => onToggle(p.id)}
                 className={`flex w-full items-center gap-1 rounded-md border px-2 py-1.5 text-left text-[13px] ${
-                  isSel ? tone.selected : tone.idle
+                  isSel ? t.selected : t.idle
                 }`}
               >
                 <span className="min-w-0 flex-1 truncate">{displayName(p)}</span>

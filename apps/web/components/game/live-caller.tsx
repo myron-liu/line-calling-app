@@ -196,6 +196,7 @@ function LineBuilder({
   seed: string[] | null;
 }) {
   const { game, roster, state, savedLines, points, actions } = live;
+  const isMixed = !!game.startingGenderRatio;
   const eligible = useMemo(
     () => roster.filter((p) => !p.injured && isRosterActive(p)),
     [roster],
@@ -322,7 +323,7 @@ function LineBuilder({
   );
 
   const result = validateLine({
-    division: game.startingGenderRatio ? "mixed" : "open",
+    division: isMixed ? "mixed" : "open",
     requiredRatio: state.genderRatio,
     players: selectedPlayers,
     eligiblePlayerIds: eligibleIds,
@@ -486,15 +487,17 @@ function LineBuilder({
       <div className="flex items-center justify-between text-sm">
         <span className="font-medium">
           {selected.length}/7 selected
-          <span className="ml-2">
-            <span className={GENDER.MMP.headerText}>
-              MMP {result.mmp}/{maxMMP}
+          {isMixed && (
+            <span className="ml-2">
+              <span className={GENDER.MMP.headerText}>
+                MMP {result.mmp}/{maxMMP}
+              </span>
+              <span className="text-faint"> · </span>
+              <span className={GENDER.WMP.headerText}>
+                WMP {result.wmp}/{maxWMP}
+              </span>
             </span>
-            <span className="text-faint"> · </span>
-            <span className={GENDER.WMP.headerText}>
-              WMP {result.wmp}/{maxWMP}
-            </span>
-          </span>
+          )}
         </span>
         {selected.length > 0 && (
           <button
@@ -564,6 +567,7 @@ function LineBuilder({
         sortMode={sortMode}
         mmpFull={mmpFull}
         wmpFull={wmpFull}
+        isMixed={isMixed}
         onToggle={toggle}
       />
       <ODAccordion
@@ -580,6 +584,7 @@ function LineBuilder({
         sortMode={sortMode}
         mmpFull={mmpFull}
         wmpFull={wmpFull}
+        isMixed={isMixed}
         onToggle={toggle}
       />
 
@@ -679,6 +684,7 @@ function ODAccordion({
   sortMode,
   mmpFull,
   wmpFull,
+  isMixed,
   onToggle,
 }: {
   label: string;
@@ -694,6 +700,7 @@ function ODAccordion({
   sortMode: SortMode;
   mmpFull: boolean;
   wmpFull: boolean;
+  isMixed: boolean;
   onToggle: (id: string) => void;
 }) {
   const t = OD_ACCORDION_TONE[tone];
@@ -717,6 +724,7 @@ function ODAccordion({
           sortMode={sortMode}
           mmpFull={mmpFull}
           wmpFull={wmpFull}
+          isMixed={isMixed}
           onToggle={onToggle}
         />
       </div>
@@ -758,6 +766,7 @@ function GenderColumns({
   sortMode,
   mmpFull,
   wmpFull,
+  isMixed,
   onToggle,
 }: {
   players: RosterSnapshotEntry[];
@@ -769,6 +778,7 @@ function GenderColumns({
   sortMode: SortMode;
   mmpFull: boolean;
   wmpFull: boolean;
+  isMixed: boolean;
   onToggle: (id: string) => void;
 }) {
   const sort =
@@ -777,10 +787,49 @@ function GenderColumns({
       : sortMode === "playtime"
         ? (list: RosterSnapshotEntry[]) => sortByFewestPlayed(list, pointsPlayed)
         : sortRoster;
+
+  // Single-division team (Open/Women): every player shares the same
+  // genderMatch, so an MMP/WMP split is redundant — just two plain columns.
+  if (!isMixed) {
+    const sorted = sort(players);
+    const mid = Math.ceil(sorted.length / 2);
+    const tone: "MMP" | "WMP" = players.some((p) => p.genderMatch === "WMP")
+      ? "WMP"
+      : "MMP";
+    const columnFull = mmpFull || wmpFull;
+    return (
+      <div className="grid grid-cols-2 gap-3">
+        <RosterColumn
+          tone={tone}
+          players={sorted.slice(0, mid)}
+          selected={selected}
+          slotLabels={slotLabels}
+          pointsPlayed={pointsPlayed}
+          benchGap={benchGap}
+          justPlayedIds={justPlayedIds}
+          columnFull={columnFull}
+          onToggle={onToggle}
+        />
+        <RosterColumn
+          tone={tone}
+          players={sorted.slice(mid)}
+          selected={selected}
+          slotLabels={slotLabels}
+          pointsPlayed={pointsPlayed}
+          benchGap={benchGap}
+          justPlayedIds={justPlayedIds}
+          columnFull={columnFull}
+          onToggle={onToggle}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="grid grid-cols-2 gap-3">
       <RosterColumn
-        gender="MMP"
+        tone="MMP"
+        label="MMP"
         players={sort(players.filter((p) => p.genderMatch === "MMP"))}
         selected={selected}
         slotLabels={slotLabels}
@@ -791,7 +840,8 @@ function GenderColumns({
         onToggle={onToggle}
       />
       <RosterColumn
-        gender="WMP"
+        tone="WMP"
+        label="WMP"
         players={sort(players.filter((p) => p.genderMatch === "WMP"))}
         selected={selected}
         slotLabels={slotLabels}
@@ -806,7 +856,8 @@ function GenderColumns({
 }
 
 function RosterColumn({
-  gender,
+  tone,
+  label,
   players,
   selected,
   slotLabels,
@@ -816,7 +867,9 @@ function RosterColumn({
   columnFull,
   onToggle,
 }: {
-  gender: "MMP" | "WMP";
+  tone: "MMP" | "WMP";
+  /** Omitted for a single-division team, where MMP/WMP is redundant. */
+  label?: string;
   players: RosterSnapshotEntry[];
   selected: string[];
   slotLabels: Record<string, string>;
@@ -826,14 +879,16 @@ function RosterColumn({
   columnFull: boolean;
   onToggle: (id: string) => void;
 }) {
-  const tone = GENDER[gender];
+  const t = GENDER[tone];
   return (
     <div>
-      <p
-        className={`mb-1 text-xs font-semibold uppercase tracking-wide ${tone.headerText}`}
-      >
-        {tone.label}
-      </p>
+      {label && (
+        <p
+          className={`mb-1 text-xs font-semibold uppercase tracking-wide ${t.headerText}`}
+        >
+          {label}
+        </p>
+      )}
       <ul className="space-y-1">
         {players.map((p) => {
           const isSel = selected.includes(p.playerId);
@@ -844,14 +899,14 @@ function RosterColumn({
                 onClick={() => onToggle(p.playerId)}
                 disabled={disabled}
                 className={`flex w-full items-center gap-1.5 rounded-md border px-2 py-2 text-[13px] ${
-                  isSel ? tone.selected : tone.idle
+                  isSel ? t.selected : t.idle
                 } ${disabled ? "opacity-40" : ""}`}
               >
                 <span className="flex min-w-0 flex-1 flex-col items-start gap-0.5">
                   <span className="flex w-full items-center gap-1">
                     {isSel && (
                       <span
-                        className={`shrink-0 rounded px-1.5 py-0.5 text-xs font-semibold text-white ${tone.badge}`}
+                        className={`shrink-0 rounded px-1.5 py-0.5 text-xs font-semibold text-white ${t.badge}`}
                       >
                         {slotLabels[p.playerId]}
                       </span>
