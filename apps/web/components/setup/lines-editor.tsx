@@ -169,7 +169,8 @@ export function LinesEditor({ tournamentId }: { tournamentId: string }) {
           <p className="text-sm font-medium">
             {editingId ? "Editing" : "New"}{" "}
             <span className="text-faint">
-              {selected.length}/7 · {mmp}M / {wmp}W
+              {selected.length}/7
+              {tournament.division === "mixed" && ` · ${mmp}M / ${wmp}W`}
             </span>
           </p>
           {editingId && (
