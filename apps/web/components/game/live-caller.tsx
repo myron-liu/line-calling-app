@@ -383,7 +383,7 @@ function LineBuilder({
     .sort((a, b) => {
       const side = sideMatchRank(a.line.side) - sideMatchRank(b.line.side);
       if (side !== 0) return side;
-      return b.line.playerIds.length - a.line.playerIds.length;
+      return a.line.name.localeCompare(b.line.name);
     });
 
   // The exact saved line/pod that was on the field for the immediately
