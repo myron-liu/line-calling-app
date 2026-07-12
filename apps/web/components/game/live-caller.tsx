@@ -373,6 +373,7 @@ function LineBuilder({
   // A line/pod fits if its MMP and WMP counts each stay within the point's caps.
   // For a full 7 this forces an exact ratio match; for a pod it just has to fit.
   const quickLines = savedLines
+    .filter((line) => !line.hidden)
     .map((line) => ({ line, ...composition(line.playerIds) }))
     .filter((x) => {
       if (x.line.playerIds.length < 1 || x.line.playerIds.length > 7) return false;

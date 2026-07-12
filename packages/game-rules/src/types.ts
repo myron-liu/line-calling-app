@@ -105,6 +105,9 @@ export interface SavedLine {
   /** Which side this line/pod is meant for; unset/"both" means it shows up
    *  for either. Drives quick-lines sort order (current side's pods first). */
   side?: ODPreference;
+  /** Hidden lines/pods stay in the saved list (still editable) but are
+   *  excluded from the live caller's quick-lines bar. Undefined = false. */
+  hidden?: boolean;
   createdAt: string;
 }
 

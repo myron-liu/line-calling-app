@@ -43,6 +43,7 @@ export function updateSavedLine(
     playerIds?: string[];
     color?: LineColor | null;
     side?: ODPreference | null;
+    hidden?: boolean;
   },
 ): Promise<SavedLine> {
   return api.patch<SavedLine>(`/saved-lines/${id}`, patch);

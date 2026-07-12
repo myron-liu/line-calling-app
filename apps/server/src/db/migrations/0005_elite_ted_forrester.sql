@@ -1,0 +1,1 @@
+ALTER TABLE "saved_lines" ADD COLUMN "hidden" boolean DEFAULT false NOT NULL;

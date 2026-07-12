@@ -36,6 +36,13 @@
       "when": 1783760220560,
       "tag": "0004_red_chat",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1783828488842,
+      "tag": "0005_elite_ted_forrester",
+      "breakpoints": true
     }
   ]
 }

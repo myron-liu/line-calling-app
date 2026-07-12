@@ -286,6 +286,7 @@ export const routes: Route[] = [
         playerIds: z.array(z.string()).optional(),
         color: lineColor.nullable().optional(),
         side: odPreference.nullable().optional(),
+        hidden: z.boolean().optional(),
       }),
     );
     const line = await q.updateSavedLine(id!, body);

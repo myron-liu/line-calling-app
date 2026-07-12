@@ -442,6 +442,7 @@ export async function updateSavedLine(
     playerIds?: string[];
     color?: LineColor | null;
     side?: ODPreference | null;
+    hidden?: boolean;
   },
 ): Promise<SavedLine | null> {
   const [existing] = await db.select().from(savedLines).where(eq(savedLines.id, id));
@@ -508,6 +509,7 @@ function toSavedLine(row: typeof savedLines.$inferSelect): SavedLine {
     useCount: row.useCount,
     color: (row.color as LineColor) ?? undefined,
     side: (row.side as ODPreference) ?? undefined,
+    hidden: row.hidden,
     createdAt: row.createdAt.toISOString(),
   };
 }

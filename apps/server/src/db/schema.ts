@@ -85,6 +85,7 @@ export const savedLines = pgTable("saved_lines", {
   useCount: integer("use_count").notNull().default(0),
   color: text("color"), // "red" | "green" | "blue" | "yellow" | "black" | "purple" | null
   side: text("side"), // "O" | "D" | "both" | null
+  hidden: boolean("hidden").notNull().default(false),
   createdAt: createdAt(),
 });
 

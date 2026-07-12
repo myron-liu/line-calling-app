@@ -144,6 +144,11 @@ export function LinesEditor({ tournamentId }: { tournamentId: string }) {
     refresh();
   };
 
+  const toggleHidden = async (line: SavedLine) => {
+    await updateSavedLine(line.id, { hidden: !line.hidden });
+    refresh();
+  };
+
   const { mmp, wmp } = composition(selected);
   const canSave = name.trim().length > 0 && selected.length > 0;
 
@@ -313,7 +318,7 @@ export function LinesEditor({ tournamentId }: { tournamentId: string }) {
                     isPod
                       ? "border-violet-300 dark:border-violet-500/40"
                       : "border-emerald-300 dark:border-emerald-500/40"
-                  }`}
+                  } ${line.hidden ? "opacity-50" : ""}`}
                 >
                   <div className="flex items-center justify-between">
                     <span className="flex items-center gap-1.5 font-medium">
@@ -327,9 +332,16 @@ export function LinesEditor({ tournamentId }: { tournamentId: string }) {
                       <span className="text-xs font-normal text-faint">
                         {isPod ? "pod" : "line"} · {odTag(line.side)} · {c.mmp}M/
                         {c.wmp}W · used {line.useCount ?? 0}×
+                        {line.hidden ? " · hidden" : ""}
                       </span>
                     </span>
                     <div className="flex gap-2">
+                      <button
+                        onClick={() => toggleHidden(line)}
+                        className="text-xs font-medium text-muted hover:text-fg"
+                      >
+                        {line.hidden ? "Show line" : "Hide line"}
+                      </button>
                       <button
                         onClick={() => startEdit(line)}
                         className="text-xs font-medium text-emerald-700 dark:text-emerald-400"
