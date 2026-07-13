@@ -521,20 +521,6 @@ function LineBuilder({
         </span>
       </div>
 
-      <SavedLinesBar
-        lines={quickLines}
-        appliedIds={appliedLineIds}
-        justPlayedId={justPlayedId}
-        ratioLabel={need ? `${maxMMP}M / ${maxWMP}W` : "any 7"}
-        onApply={applyLine}
-        note={applyNote}
-      />
-
-      <InjuryManager
-        roster={roster.filter(isRosterActive)}
-        onToggle={(id, injured) => actions.setInjured(id, injured)}
-      />
-
       <div className="flex flex-wrap items-center gap-2 text-xs">
         <span className="text-faint">Sort:</span>
         <SortToggleButton
@@ -587,6 +573,20 @@ function LineBuilder({
         wmpFull={wmpFull}
         isMixed={isMixed}
         onToggle={toggle}
+      />
+
+      <SavedLinesBar
+        lines={quickLines}
+        appliedIds={appliedLineIds}
+        justPlayedId={justPlayedId}
+        ratioLabel={need ? `${maxMMP}M / ${maxWMP}W` : "any 7"}
+        onApply={applyLine}
+        note={applyNote}
+      />
+
+      <InjuryManager
+        roster={roster.filter(isRosterActive)}
+        onToggle={(id, injured) => actions.setInjured(id, injured)}
       />
 
       <SaveLineButton
@@ -705,6 +705,18 @@ function ODAccordion({
   onToggle: (id: string) => void;
 }) {
   const t = OD_ACCORDION_TONE[tone];
+  // How many of the current selection come from this O/D group, split by
+  // gender — lets the coach see each side's contribution to the line at a
+  // glance, without expanding the accordion.
+  const selectedCount = players.reduce(
+    (acc, p) => {
+      if (!selected.includes(p.playerId)) return acc;
+      if (p.genderMatch === "MMP") acc.mmp++;
+      else acc.wmp++;
+      return acc;
+    },
+    { mmp: 0, wmp: 0 },
+  );
   return (
     <details
       open={open}
@@ -713,6 +725,11 @@ function ODAccordion({
     >
       <summary className={`cursor-pointer text-sm font-semibold ${t.text}`}>
         {label} <span className="font-normal text-faint">({players.length})</span>
+        {isMixed && (
+          <span className="ml-2 font-normal text-faint">
+            {selectedCount.mmp}M/{selectedCount.wmp}W selected
+          </span>
+        )}
       </summary>
       <div className="mt-2">
         <GenderColumns
