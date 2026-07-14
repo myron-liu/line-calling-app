@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import type {
   Division,
@@ -761,6 +761,25 @@ export function GameList({
   const [deleting, setDeleting] = useState<Game | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
+  // Chronological by scheduled date/time — games missing either (not yet
+  // pinned down) sort to the end rather than arbitrarily to the front.
+  const sortedList = useMemo(() => {
+    return [...list].sort((a, b) => {
+      const dateA = a.gameDate ?? "";
+      const dateB = b.gameDate ?? "";
+      if (dateA !== dateB) {
+        if (!dateA) return 1;
+        if (!dateB) return -1;
+        return dateA.localeCompare(dateB);
+      }
+      const timeA = a.startTime ?? "";
+      const timeB = b.startTime ?? "";
+      if (!timeA) return timeB ? 1 : 0;
+      if (!timeB) return -1;
+      return timeA.localeCompare(timeB);
+    });
+  }, [list]);
+
   const confirmDelete = () => {
     if (!deleting) return;
     deleteGame(deleting.id)
@@ -780,7 +799,7 @@ export function GameList({
   return (
     <>
       <ul className="space-y-2">
-        {list.map((g) => (
+        {sortedList.map((g) => (
           <li
             key={g.id}
             className="flex items-center justify-between gap-2 rounded-lg border border-line px-4 py-3"
@@ -789,6 +808,7 @@ export function GameList({
               <p className="truncate font-medium">vs {g.opponentName}</p>
               <p className="flex flex-wrap items-center gap-1.5 text-xs text-faint">
                 <span>
+                  {g.startTime && `${g.startTime} · `}
                   {statusLabel[g.status]} ·{" "}
                   {g.gameCap === null ? "time cap" : `cap ${g.gameCap}`}
                 </span>
