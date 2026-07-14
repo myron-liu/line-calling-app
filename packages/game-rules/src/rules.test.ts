@@ -9,6 +9,8 @@ import {
   pointsPlayed,
   lastPlayedPoint,
   halfScoreForCap,
+  teamPointOutcomes,
+  playerPointOutcomes,
 } from "./rules";
 import { validateLine, lineWarnings, type LinePlayer } from "./validation";
 import type { GenderRatio, Point } from "./types";
@@ -165,6 +167,63 @@ describe("pointsPlayed (§4.4)", () => {
     const last = lastPlayedPoint(log);
     expect(last["a"]).toBe(1);
     expect(last["z"]).toBeUndefined();
+  });
+});
+
+describe("teamPointOutcomes / playerPointOutcomes (recap stats)", () => {
+  const mk = (
+    n: number,
+    od: "O" | "D",
+    lineup: string[],
+    result?: "us" | "them",
+  ): Point => ({
+    id: `p${n}`,
+    gameId: "g",
+    pointNumber: n,
+    od,
+    lineup,
+    result,
+    isFirstAfterHalftime: false,
+  });
+
+  test("teamPointOutcomes tallies holds/broken/breaks/opponentHolds by starting side", () => {
+    const log = [
+      mk(1, "O", ["a", "b"], "us"), // hold
+      mk(2, "O", ["a", "b"], "them"), // broken
+      mk(3, "D", ["a", "b"], "us"), // break
+      mk(4, "D", ["a", "b"], "them"), // opponent held
+      mk(5, "O", ["a", "b"], undefined), // in progress: not counted
+    ];
+    expect(teamPointOutcomes(log)).toEqual({
+      holds: 1,
+      broken: 1,
+      breaks: 1,
+      opponentHolds: 1,
+    });
+  });
+
+  test("playerPointOutcomes tallies +/- per player, split by O/D starting side", () => {
+    const log = [
+      mk(1, "O", ["a", "b"], "us"), // O hold: a,b +1 O
+      mk(2, "O", ["a", "c"], "them"), // O broken: a,c -1 O
+      mk(3, "D", ["a", "b"], "us"), // D break: a,b +1 D
+      mk(4, "D", ["a", "c"], "them"), // D opponent held: a,c -1 D
+    ];
+    const out = playerPointOutcomes(log);
+    expect(out["a"]).toEqual({ oPlusMinus: 0, dPlusMinus: 0 });
+    expect(out["b"]).toEqual({ oPlusMinus: 1, dPlusMinus: 1 });
+    expect(out["c"]).toEqual({ oPlusMinus: -1, dPlusMinus: -1 });
+  });
+
+  test("only completed points count", () => {
+    const log = [mk(1, "O", ["a"], undefined)];
+    expect(playerPointOutcomes(log)).toEqual({});
+    expect(teamPointOutcomes(log)).toEqual({
+      holds: 0,
+      broken: 0,
+      breaks: 0,
+      opponentHolds: 0,
+    });
   });
 });
 

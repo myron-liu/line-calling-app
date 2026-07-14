@@ -105,6 +105,64 @@ export function lastPlayedPoint(points: Point[]): Record<string, number> {
   return last;
 }
 
+// ── Point outcomes (holds/breaks) — recap stats ─────────────────────────────
+
+/**
+ * Team-wide tally of each point outcome by the side it started on: a "hold"
+ * is a point started on O that we won, "broken" is one started on O that we
+ * lost; a "break" is a point started on D that we won, and the opponent
+ * "held" is one started on D that we lost. Only completed points count.
+ */
+export interface TeamPointOutcomes {
+  holds: number;
+  broken: number;
+  breaks: number;
+  opponentHolds: number;
+}
+
+export function teamPointOutcomes(points: Point[]): TeamPointOutcomes {
+  const out: TeamPointOutcomes = { holds: 0, broken: 0, breaks: 0, opponentHolds: 0 };
+  for (const p of points) {
+    if (p.result === undefined) continue;
+    if (p.od === "O") {
+      if (p.result === "us") out.holds++;
+      else out.broken++;
+    } else {
+      if (p.result === "us") out.breaks++;
+      else out.opponentHolds++;
+    }
+  }
+  return out;
+}
+
+/**
+ * Per-player +/- split by the side each point started on: +1 for a point
+ * their team won, -1 for one it lost, tallied separately for O-starting and
+ * D-starting points. Same counting convention as pointsPlayed — starting
+ * lineup only, sub-ins excluded, only completed points.
+ */
+export interface PlayerPointOutcomes {
+  oPlusMinus: number;
+  dPlusMinus: number;
+}
+
+export function playerPointOutcomes(
+  points: Point[],
+): Record<string, PlayerPointOutcomes> {
+  const out: Record<string, PlayerPointOutcomes> = {};
+  for (const p of points) {
+    if (p.result === undefined) continue;
+    const delta = p.result === "us" ? 1 : -1;
+    for (const id of p.lineup) {
+      const entry = out[id] ?? { oPlusMinus: 0, dPlusMinus: 0 };
+      if (p.od === "O") entry.oPlusMinus += delta;
+      else entry.dPlusMinus += delta;
+      out[id] = entry;
+    }
+  }
+  return out;
+}
+
 // ── Half score derivation — §4.2 ─────────────────────────────────────────────
 
 /** 7 for a 13-cap, 8 for a 15-cap, null for a time-cap game (no auto-halftime
