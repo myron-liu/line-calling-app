@@ -119,8 +119,6 @@ export interface TournamentPlayerStats {
   dPointsPlayed: number;
   oPlusMinus: number;
   dPlusMinus: number;
-  oOnOffDiff: number | null;
-  dOnOffDiff: number | null;
 }
 
 export interface TournamentStats {

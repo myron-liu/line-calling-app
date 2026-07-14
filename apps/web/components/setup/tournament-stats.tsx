@@ -11,7 +11,36 @@ import {
 } from "@/lib/storage/tournaments";
 import { displayName, roleTag } from "@/lib/player-display";
 
-type StatSortMode = "points" | "dPlusMinus" | "oPlusMinus";
+type StatSortKey =
+  | "name"
+  | "pointsPlayed"
+  | "dPointsPlayed"
+  | "dPlusMinus"
+  | "oPointsPlayed"
+  | "oPlusMinus";
+
+interface StatSort {
+  key: StatSortKey;
+  dir: "asc" | "desc";
+}
+
+function toggleStatSort(cur: StatSort, key: StatSortKey): StatSort {
+  if (cur.key === key) return { key, dir: cur.dir === "asc" ? "desc" : "asc" };
+  return { key, dir: key === "name" ? "asc" : "desc" };
+}
+
+function compareStatRows(
+  a: TournamentPlayerStats,
+  b: TournamentPlayerStats,
+  sort: StatSort,
+): number {
+  if (sort.key === "name") {
+    const cmp = displayName(a).localeCompare(displayName(b));
+    return sort.dir === "asc" ? cmp : -cmp;
+  }
+  const diff = sort.dir === "asc" ? a[sort.key] - b[sort.key] : b[sort.key] - a[sort.key];
+  return diff || displayName(a).localeCompare(displayName(b));
+}
 
 // Aggregated points-played/+/- stats across every game in the tournament,
 // reached from the tournament page. Overall holds/breaks come from
@@ -21,7 +50,8 @@ export function TournamentStats({ tournamentId }: { tournamentId: string }) {
     undefined,
   );
   const [stats, setStats] = useState<TournamentStatsData | null>(null);
-  const [sortMode, setSortMode] = useState<StatSortMode>("points");
+  const [sort, setSort] = useState<StatSort>({ key: "pointsPlayed", dir: "desc" });
+  const onSort = (key: StatSortKey) => setSort((cur) => toggleStatSort(cur, key));
 
   useEffect(() => {
     findTournament(tournamentId).then((t) => {
@@ -78,25 +108,6 @@ export function TournamentStats({ tournamentId }: { tournamentId: string }) {
       </div>
 
       <div className="space-y-2">
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          <span className="text-faint">Sort:</span>
-          <SortButton
-            label="Points"
-            active={sortMode === "points"}
-            onClick={() => setSortMode("points")}
-          />
-          <SortButton
-            label="D +/-"
-            active={sortMode === "dPlusMinus"}
-            onClick={() => setSortMode("dPlusMinus")}
-          />
-          <SortButton
-            label="O +/-"
-            active={sortMode === "oPlusMinus"}
-            onClick={() => setSortMode("oPlusMinus")}
-          />
-        </div>
-
         {stats.players.length === 0 ? (
           <p className="text-sm text-muted">No completed points yet.</p>
         ) : isMixed ? (
@@ -105,20 +116,23 @@ export function TournamentStats({ tournamentId }: { tournamentId: string }) {
               label="MMP"
               tone="sky"
               players={stats.players.filter((p) => p.genderMatch === "MMP")}
-              sortMode={sortMode}
+              sort={sort}
+              onSort={onSort}
             />
             <PlayerStatsTable
               label="WMP"
               tone="rose"
               players={stats.players.filter((p) => p.genderMatch === "WMP")}
-              sortMode={sortMode}
+              sort={sort}
+              onSort={onSort}
             />
           </div>
         ) : (
           <PlayerStatsTable
             tone={tournament.division === "open" ? "sky" : "rose"}
             players={stats.players}
-            sortMode={sortMode}
+            sort={sort}
+            onSort={onSort}
           />
         )}
       </div>
@@ -135,61 +149,60 @@ function StatTile({ label, value }: { label: string; value: number }) {
   );
 }
 
-function SortButton({
-  label,
-  active,
-  onClick,
-}: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      aria-pressed={active}
-      className={`rounded-full border px-2 py-0.5 ${
-        active
-          ? "border-emerald-500 bg-emerald-50 font-medium text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300"
-          : "border-line-strong text-faint"
-      }`}
-    >
-      {label}
-    </button>
-  );
-}
-
 function formatPlusMinus(n: number): string {
   return n > 0 ? `+${n}` : `${n}`;
 }
 
-function formatOnOffDiff(n: number | null): string {
-  if (n === null) return "—";
-  const rounded = Math.round(n * 100) / 100;
-  return rounded > 0 ? `+${rounded}` : `${rounded}`;
+/** Column header that sorts its column on click, toggling asc/desc on repeat
+ *  clicks, with a ▲/▼ indicator on whichever column is currently active. */
+function SortableTh({
+  label,
+  sortKey,
+  sort,
+  onSort,
+  align,
+  toneClassName,
+}: {
+  label: string;
+  sortKey: StatSortKey;
+  sort: StatSort;
+  onSort: (key: StatSortKey) => void;
+  align: "left" | "right";
+  toneClassName?: string;
+}) {
+  const active = sort.key === sortKey;
+  return (
+    <th
+      className={`border-b border-line pb-1 ${align === "right" ? "text-right" : "text-left"} text-xs font-semibold uppercase tracking-wide ${toneClassName ?? "text-faint"}`}
+    >
+      <button
+        onClick={() => onSort(sortKey)}
+        className={`inline-flex items-center gap-0.5 hover:text-fg ${
+          align === "right" ? "flex-row-reverse" : ""
+        } ${active ? "text-fg" : ""}`}
+      >
+        <span>{label}</span>
+        {active && <span aria-hidden>{sort.dir === "asc" ? "▲" : "▼"}</span>}
+      </button>
+    </th>
+  );
 }
 
 function PlayerStatsTable({
   label,
   tone,
   players,
-  sortMode,
+  sort,
+  onSort,
 }: {
   /** Omitted for a single-division tournament, where MMP/WMP is redundant. */
   label?: string;
   tone: "sky" | "rose";
   players: TournamentPlayerStats[];
-  sortMode: StatSortMode;
+  sort: StatSort;
+  onSort: (key: StatSortKey) => void;
 }) {
-  const rows = [...players].sort((a, b) => {
-    const diff =
-      sortMode === "points"
-        ? b.pointsPlayed - a.pointsPlayed
-        : sortMode === "dPlusMinus"
-          ? b.dPlusMinus - a.dPlusMinus
-          : b.oPlusMinus - a.oPlusMinus;
-    return diff || displayName(a).localeCompare(displayName(b));
-  });
+  const rows = [...players].sort((a, b) => compareStatRows(a, b, sort));
 
   const headerTone = tone === "sky" ? "text-sky-600 dark:text-sky-400" : "text-rose-600 dark:text-rose-400";
 
@@ -197,34 +210,19 @@ function PlayerStatsTable({
     <table className="w-full text-sm">
       <thead>
         <tr>
-          <th
-            className={`border-b border-line pb-1 text-left text-xs font-semibold uppercase tracking-wide ${
-              label ? headerTone : "text-faint"
-            }`}
-          >
-            {label ?? "Player"}
-          </th>
-          <th className="border-b border-line pb-1 text-right text-xs font-semibold uppercase tracking-wide text-faint">
-            Pts
-          </th>
-          <th className="border-b border-line pb-1 text-right text-xs font-semibold uppercase tracking-wide text-faint">
-            D Pts
-          </th>
-          <th className="border-b border-line pb-1 text-right text-xs font-semibold uppercase tracking-wide text-faint">
-            D +/-
-          </th>
-          <th className="border-b border-line pb-1 text-right text-xs font-semibold uppercase tracking-wide text-faint">
-            D On/Off
-          </th>
-          <th className="border-b border-line pb-1 text-right text-xs font-semibold uppercase tracking-wide text-faint">
-            O Pts
-          </th>
-          <th className="border-b border-line pb-1 text-right text-xs font-semibold uppercase tracking-wide text-faint">
-            O +/-
-          </th>
-          <th className="border-b border-line pb-1 text-right text-xs font-semibold uppercase tracking-wide text-faint">
-            O On/Off
-          </th>
+          <SortableTh
+            label={label ?? "Player"}
+            sortKey="name"
+            sort={sort}
+            onSort={onSort}
+            align="left"
+            toneClassName={label ? headerTone : undefined}
+          />
+          <SortableTh label="Pts" sortKey="pointsPlayed" sort={sort} onSort={onSort} align="right" />
+          <SortableTh label="D Pts" sortKey="dPointsPlayed" sort={sort} onSort={onSort} align="right" />
+          <SortableTh label="D +/-" sortKey="dPlusMinus" sort={sort} onSort={onSort} align="right" />
+          <SortableTh label="O Pts" sortKey="oPointsPlayed" sort={sort} onSort={onSort} align="right" />
+          <SortableTh label="O +/-" sortKey="oPlusMinus" sort={sort} onSort={onSort} align="right" />
         </tr>
       </thead>
       <tbody>
@@ -246,16 +244,10 @@ function PlayerStatsTable({
               {formatPlusMinus(p.dPlusMinus)}
             </td>
             <td className="border-b border-line py-1 text-right tabular-nums text-muted">
-              {formatOnOffDiff(p.dOnOffDiff)}
-            </td>
-            <td className="border-b border-line py-1 text-right tabular-nums text-muted">
               {p.oPointsPlayed}
             </td>
             <td className="border-b border-line py-1 text-right tabular-nums text-muted">
               {formatPlusMinus(p.oPlusMinus)}
-            </td>
-            <td className="border-b border-line py-1 text-right tabular-nums text-muted">
-              {formatOnOffDiff(p.oOnOffDiff)}
             </td>
           </tr>
         ))}

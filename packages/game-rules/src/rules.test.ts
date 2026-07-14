@@ -11,8 +11,6 @@ import {
   halfScoreForCap,
   teamPointOutcomes,
   playerPointOutcomes,
-  playerOnOffComponents,
-  onOffDiff,
 } from "./rules";
 import { validateLine, lineWarnings, type LinePlayer } from "./validation";
 import type { GenderRatio, Point } from "./types";
@@ -243,28 +241,6 @@ describe("teamPointOutcomes / playerPointOutcomes (recap stats)", () => {
     });
   });
 
-  test("playerOnOffComponents / onOffDiff: team's net with a player on vs off the line", () => {
-    const log = [
-      mk(1, "O", ["a", "b"], "us"), // hold
-      mk(2, "O", ["a", "c"], "us"), // hold
-      mk(3, "O", ["c", "d"], "them"), // broken
-      mk(4, "O", ["b", "d"], "them"), // broken
-      mk(5, "D", ["a", "e"], "us"), // break
-      mk(6, "D", ["e", "f"], "them"), // opponent held
-    ];
-    const components = playerOnOffComponents(log);
-
-    // "a" only ever played the two O points the team won: team is +1/pt
-    // with them on (2 net / 2 pts) vs -1/pt without (-2 net / 2 pts).
-    expect(onOffDiff(components["a"]!)).toEqual({ oOnOffDiff: 2, dOnOffDiff: 2 });
-    // "d" only ever played the two O points the team lost: mirror image of "a".
-    expect(onOffDiff(components["d"]!)).toEqual({ oOnOffDiff: -2, dOnOffDiff: null });
-    // "b"/"c" each played one win and one loss on O: net wash either way.
-    expect(onOffDiff(components["b"]!).oOnOffDiff).toBe(0);
-    expect(onOffDiff(components["c"]!).oOnOffDiff).toBe(0);
-    // "e" played every single D point, so there's no "off" side to compare to.
-    expect(onOffDiff(components["e"]!).dOnOffDiff).toBeNull();
-  });
 });
 
 describe("halfScoreForCap (§4.2)", () => {

@@ -2,20 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import type {
-  Game,
-  GenderMatch,
-  OD,
-  Point,
-  PlayerOnOffComponents,
-  PlayerPointOutcomes,
-} from "@shared/game-rules";
-import {
-  onOffDiff,
-  playerOnOffComponents,
-  playerPointOutcomes,
-  teamPointOutcomes,
-} from "@shared/game-rules";
+import type { Game, GenderMatch, OD, Point, PlayerPointOutcomes } from "@shared/game-rules";
+import { playerPointOutcomes, teamPointOutcomes } from "@shared/game-rules";
 import { useLiveGame, type LiveGame } from "@/lib/game/useLiveGame";
 import { readTeam } from "@/lib/storage/teams";
 import { findTournament } from "@/lib/storage/tournaments";
@@ -248,7 +236,6 @@ function Recap({ live }: { live: LiveGame }) {
   );
   const outcomes = useMemo(() => teamPointOutcomes(points), [points]);
   const playerOutcomes = useMemo(() => playerPointOutcomes(points), [points]);
-  const onOffComponents = useMemo(() => playerOnOffComponents(points), [points]);
 
   return (
     <section className="space-y-4">
@@ -281,7 +268,6 @@ function Recap({ live }: { live: LiveGame }) {
         roster={roster}
         pointsPlayed={state.pointsPlayed}
         playerOutcomes={playerOutcomes}
-        onOffComponents={onOffComponents}
       />
     </section>
   );
@@ -406,83 +392,72 @@ function LineHistory({
 
 // ── Points-played tables ─────────────────────────────────────────────────────
 
-type StatSortMode = "points" | "dPlusMinus" | "oPlusMinus";
+type StatSortKey =
+  | "name"
+  | "count"
+  | "dPointsPlayed"
+  | "dPlusMinus"
+  | "oPointsPlayed"
+  | "oPlusMinus";
+
+interface StatSort {
+  key: StatSortKey;
+  dir: "asc" | "desc";
+}
+
+function toggleStatSort(cur: StatSort, key: StatSortKey): StatSort {
+  if (cur.key === key) return { key, dir: cur.dir === "asc" ? "desc" : "asc" };
+  return { key, dir: key === "name" ? "asc" : "desc" };
+}
+
+interface StatRow {
+  p: RosterSnapshotEntry;
+  count: number;
+  oPointsPlayed: number;
+  dPointsPlayed: number;
+  oPlusMinus: number;
+  dPlusMinus: number;
+}
+
+function compareStatRows(a: StatRow, b: StatRow, sort: StatSort): number {
+  if (sort.key === "name") {
+    const cmp = displayName(a.p).localeCompare(displayName(b.p));
+    return sort.dir === "asc" ? cmp : -cmp;
+  }
+  const diff = sort.dir === "asc" ? a[sort.key] - b[sort.key] : b[sort.key] - a[sort.key];
+  return diff || displayName(a.p).localeCompare(displayName(b.p));
+}
 
 function PointsPlayedTables({
   roster,
   pointsPlayed,
   playerOutcomes,
-  onOffComponents,
 }: {
   roster: RosterSnapshotEntry[];
   pointsPlayed: Record<string, number>;
   playerOutcomes: Record<string, PlayerPointOutcomes>;
-  onOffComponents: Record<string, PlayerOnOffComponents>;
 }) {
-  const [sortMode, setSortMode] = useState<StatSortMode>("points");
+  const [sort, setSort] = useState<StatSort>({ key: "count", dir: "desc" });
+  const onSort = (key: StatSortKey) => setSort((cur) => toggleStatSort(cur, key));
   return (
-    <div className="space-y-2">
-      <div className="flex flex-wrap items-center gap-2 text-xs">
-        <span className="text-faint">Sort:</span>
-        <StatSortButton
-          label="Points"
-          active={sortMode === "points"}
-          onClick={() => setSortMode("points")}
-        />
-        <StatSortButton
-          label="D +/-"
-          active={sortMode === "dPlusMinus"}
-          onClick={() => setSortMode("dPlusMinus")}
-        />
-        <StatSortButton
-          label="O +/-"
-          active={sortMode === "oPlusMinus"}
-          onClick={() => setSortMode("oPlusMinus")}
-        />
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        <PointsPlayedTable
-          gender="MMP"
-          roster={roster}
-          pointsPlayed={pointsPlayed}
-          playerOutcomes={playerOutcomes}
-          onOffComponents={onOffComponents}
-          sortMode={sortMode}
-        />
-        <PointsPlayedTable
-          gender="WMP"
-          roster={roster}
-          pointsPlayed={pointsPlayed}
-          playerOutcomes={playerOutcomes}
-          onOffComponents={onOffComponents}
-          sortMode={sortMode}
-        />
-      </div>
+    <div className="grid grid-cols-2 gap-3">
+      <PointsPlayedTable
+        gender="MMP"
+        roster={roster}
+        pointsPlayed={pointsPlayed}
+        playerOutcomes={playerOutcomes}
+        sort={sort}
+        onSort={onSort}
+      />
+      <PointsPlayedTable
+        gender="WMP"
+        roster={roster}
+        pointsPlayed={pointsPlayed}
+        playerOutcomes={playerOutcomes}
+        sort={sort}
+        onSort={onSort}
+      />
     </div>
-  );
-}
-
-function StatSortButton({
-  label,
-  active,
-  onClick,
-}: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      aria-pressed={active}
-      className={`rounded-full border px-2 py-0.5 ${
-        active
-          ? "border-emerald-500 bg-emerald-50 font-medium text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300"
-          : "border-line-strong text-faint"
-      }`}
-    >
-      {label}
-    </button>
   );
 }
 
@@ -490,10 +465,39 @@ function formatPlusMinus(n: number): string {
   return n > 0 ? `+${n}` : `${n}`;
 }
 
-function formatOnOffDiff(n: number | null): string {
-  if (n === null) return "—";
-  const rounded = Math.round(n * 100) / 100;
-  return rounded > 0 ? `+${rounded}` : `${rounded}`;
+/** Column header that sorts its column on click, toggling asc/desc on repeat
+ *  clicks, with a ▲/▼ indicator on whichever column is currently active. */
+function SortableTh({
+  label,
+  sortKey,
+  sort,
+  onSort,
+  align,
+  toneClassName,
+}: {
+  label: string;
+  sortKey: StatSortKey;
+  sort: StatSort;
+  onSort: (key: StatSortKey) => void;
+  align: "left" | "right";
+  toneClassName?: string;
+}) {
+  const active = sort.key === sortKey;
+  return (
+    <th
+      className={`border-b border-line pb-1 ${align === "right" ? "text-right" : "text-left"} text-xs font-semibold uppercase tracking-wide ${toneClassName ?? "text-faint"}`}
+    >
+      <button
+        onClick={() => onSort(sortKey)}
+        className={`inline-flex items-center gap-0.5 hover:text-fg ${
+          align === "right" ? "flex-row-reverse" : ""
+        } ${active ? "text-fg" : ""}`}
+      >
+        <span>{label}</span>
+        {active && <span aria-hidden>{sort.dir === "asc" ? "▲" : "▼"}</span>}
+      </button>
+    </th>
+  );
 }
 
 function PointsPlayedTable({
@@ -501,24 +505,20 @@ function PointsPlayedTable({
   roster,
   pointsPlayed,
   playerOutcomes,
-  onOffComponents,
-  sortMode,
+  sort,
+  onSort,
 }: {
   gender: GenderMatch;
   roster: RosterSnapshotEntry[];
   pointsPlayed: Record<string, number>;
   playerOutcomes: Record<string, PlayerPointOutcomes>;
-  onOffComponents: Record<string, PlayerOnOffComponents>;
-  sortMode: StatSortMode;
+  sort: StatSort;
+  onSort: (key: StatSortKey) => void;
 }) {
-  const rows = roster
+  const rows: StatRow[] = roster
     .filter((p) => p.genderMatch === gender)
     .map((p) => {
       const o = playerOutcomes[p.playerId];
-      const c = onOffComponents[p.playerId];
-      const { oOnOffDiff, dOnOffDiff } = c
-        ? onOffDiff(c)
-        : { oOnOffDiff: null, dOnOffDiff: null };
       return {
         p,
         count: pointsPlayed[p.playerId] ?? 0,
@@ -526,19 +526,9 @@ function PointsPlayedTable({
         dPointsPlayed: o?.dPointsPlayed ?? 0,
         oPlusMinus: o?.oPlusMinus ?? 0,
         dPlusMinus: o?.dPlusMinus ?? 0,
-        oOnOffDiff,
-        dOnOffDiff,
       };
     })
-    .sort((a, b) => {
-      const diff =
-        sortMode === "points"
-          ? b.count - a.count
-          : sortMode === "dPlusMinus"
-            ? b.dPlusMinus - a.dPlusMinus
-            : b.oPlusMinus - a.oPlusMinus;
-      return diff || displayName(a.p).localeCompare(displayName(b.p));
-    });
+    .sort((a, b) => compareStatRows(a, b, sort));
 
   const headerTone =
     gender === "MMP"
@@ -549,72 +539,35 @@ function PointsPlayedTable({
     <table className="w-full text-sm">
       <thead>
         <tr>
-          <th
-            className={`border-b border-line pb-1 text-left text-xs font-semibold uppercase tracking-wide ${headerTone}`}
-          >
-            {gender}
-          </th>
-          <th className="border-b border-line pb-1 text-right text-xs font-semibold uppercase tracking-wide text-faint">
-            Pts
-          </th>
-          <th className="border-b border-line pb-1 text-right text-xs font-semibold uppercase tracking-wide text-faint">
-            D Pts
-          </th>
-          <th className="border-b border-line pb-1 text-right text-xs font-semibold uppercase tracking-wide text-faint">
-            D +/-
-          </th>
-          <th className="border-b border-line pb-1 text-right text-xs font-semibold uppercase tracking-wide text-faint">
-            D On/Off
-          </th>
-          <th className="border-b border-line pb-1 text-right text-xs font-semibold uppercase tracking-wide text-faint">
-            O Pts
-          </th>
-          <th className="border-b border-line pb-1 text-right text-xs font-semibold uppercase tracking-wide text-faint">
-            O +/-
-          </th>
-          <th className="border-b border-line pb-1 text-right text-xs font-semibold uppercase tracking-wide text-faint">
-            O On/Off
-          </th>
+          <SortableTh label={gender} sortKey="name" sort={sort} onSort={onSort} align="left" toneClassName={headerTone} />
+          <SortableTh label="Pts" sortKey="count" sort={sort} onSort={onSort} align="right" />
+          <SortableTh label="D Pts" sortKey="dPointsPlayed" sort={sort} onSort={onSort} align="right" />
+          <SortableTh label="D +/-" sortKey="dPlusMinus" sort={sort} onSort={onSort} align="right" />
+          <SortableTh label="O Pts" sortKey="oPointsPlayed" sort={sort} onSort={onSort} align="right" />
+          <SortableTh label="O +/-" sortKey="oPlusMinus" sort={sort} onSort={onSort} align="right" />
         </tr>
       </thead>
       <tbody>
-        {rows.map(
-          ({
-            p,
-            count,
-            oPointsPlayed,
-            dPointsPlayed,
-            oPlusMinus,
-            dPlusMinus,
-            oOnOffDiff,
-            dOnOffDiff,
-          }) => (
-            <tr key={p.playerId}>
-              <td className="border-b border-line py-1">{displayName(p)}</td>
-              <td className="border-b border-line py-1 text-right tabular-nums text-muted">
-                {count}
-              </td>
-              <td className="border-b border-line py-1 text-right tabular-nums text-muted">
-                {dPointsPlayed}
-              </td>
-              <td className="border-b border-line py-1 text-right tabular-nums text-muted">
-                {formatPlusMinus(dPlusMinus)}
-              </td>
-              <td className="border-b border-line py-1 text-right tabular-nums text-muted">
-                {formatOnOffDiff(dOnOffDiff)}
-              </td>
-              <td className="border-b border-line py-1 text-right tabular-nums text-muted">
-                {oPointsPlayed}
-              </td>
-              <td className="border-b border-line py-1 text-right tabular-nums text-muted">
-                {formatPlusMinus(oPlusMinus)}
-              </td>
-              <td className="border-b border-line py-1 text-right tabular-nums text-muted">
-                {formatOnOffDiff(oOnOffDiff)}
-              </td>
-            </tr>
-          ),
-        )}
+        {rows.map(({ p, count, oPointsPlayed, dPointsPlayed, oPlusMinus, dPlusMinus }) => (
+          <tr key={p.playerId}>
+            <td className="border-b border-line py-1">{displayName(p)}</td>
+            <td className="border-b border-line py-1 text-right tabular-nums text-muted">
+              {count}
+            </td>
+            <td className="border-b border-line py-1 text-right tabular-nums text-muted">
+              {dPointsPlayed}
+            </td>
+            <td className="border-b border-line py-1 text-right tabular-nums text-muted">
+              {formatPlusMinus(dPlusMinus)}
+            </td>
+            <td className="border-b border-line py-1 text-right tabular-nums text-muted">
+              {oPointsPlayed}
+            </td>
+            <td className="border-b border-line py-1 text-right tabular-nums text-muted">
+              {formatPlusMinus(oPlusMinus)}
+            </td>
+          </tr>
+        ))}
       </tbody>
     </table>
   );
