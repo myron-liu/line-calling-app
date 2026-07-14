@@ -9,7 +9,7 @@
 // Checking players in/out still cascades to every game under the tournament —
 // the server does that once per flush (see queries.ts's syncTournamentGameRosters).
 
-import type { Division, Tournament } from "@shared/game-rules";
+import type { Division, GenderMatch, Role, Tournament } from "@shared/game-rules";
 import { api } from "../api/client";
 import { keys } from "./keys";
 import { read, write } from "./store";
@@ -102,4 +102,37 @@ export function syncTournamentRoster(
   return api.put<TournamentRosterEntry[]>(`/tournaments/${tournamentId}/roster`, {
     changes,
   });
+}
+
+// ── Stats ────────────────────────────────────────────────────────────────────
+
+/** One player's points-played/+/- totals, summed across every game in the
+ *  tournament (see apps/server/src/db/queries.ts's getTournamentStats). */
+export interface TournamentPlayerStats {
+  playerId: string;
+  name: string;
+  nickname?: string;
+  genderMatch: GenderMatch;
+  role: Role;
+  pointsPlayed: number;
+  oPointsPlayed: number;
+  dPointsPlayed: number;
+  oPlusMinus: number;
+  dPlusMinus: number;
+  oOnOffDiff: number | null;
+  dOnOffDiff: number | null;
+}
+
+export interface TournamentStats {
+  holds: number;
+  broken: number;
+  breaks: number;
+  opponentHolds: number;
+  players: TournamentPlayerStats[];
+}
+
+export function readTournamentStats(
+  tournamentId: string,
+): Promise<TournamentStats> {
+  return api.get<TournamentStats>(`/tournaments/${tournamentId}/stats`);
 }

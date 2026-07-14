@@ -7,7 +7,15 @@
 // into a mutation or decides anything about the game's own state.
 
 import { and, eq } from "drizzle-orm";
-import { deriveLiveGameState } from "@shared/game-rules";
+import {
+  deriveLiveGameState,
+  onOffDiff,
+  playerOnOffComponents,
+  playerPointOutcomes,
+  pointsPlayed,
+  teamPointOutcomes,
+  type PlayerOnOffComponents,
+} from "@shared/game-rules";
 import type {
   Division,
   Game,
@@ -735,6 +743,142 @@ export async function listTournamentGames(
     .from(games)
     .where(eq(games.tournamentId, tournamentId));
   return Promise.all(rows.map(attachLiveScore));
+}
+
+export interface TournamentPlayerStats {
+  playerId: string;
+  name: string;
+  nickname?: string;
+  genderMatch: GenderMatch;
+  role: Role;
+  pointsPlayed: number;
+  oPointsPlayed: number;
+  dPointsPlayed: number;
+  oPlusMinus: number;
+  dPlusMinus: number;
+  oOnOffDiff: number | null;
+  dOnOffDiff: number | null;
+}
+
+export interface TournamentStats {
+  holds: number;
+  broken: number;
+  breaks: number;
+  opponentHolds: number;
+  players: TournamentPlayerStats[];
+}
+
+/** Running per-player totals across games, before the on/off rates are
+ *  derived — the raw counts/nets have to be summed first (see
+ *  playerOnOffComponents's doc comment on why per-game rates can't just be
+ *  averaged). */
+interface TournamentPlayerAccumulator
+  extends Omit<TournamentPlayerStats, "oOnOffDiff" | "dOnOffDiff"> {
+  onOff: PlayerOnOffComponents;
+}
+
+/**
+ * Aggregates points-played/+/- stats (the same ones the single-game recap
+ * shows, see @shared/game-rules's pointsPlayed/playerPointOutcomes/
+ * playerOnOffComponents) across every game in a tournament, summed per
+ * player. Another read-only exception to "no business rules on server" (see
+ * attachLiveScore above) — this never feeds back into a mutation, just
+ * aggregates what the client already wrote. In-progress games contribute
+ * whatever completed points they have so far; a player's display info
+ * (name/nickname/genderMatch/role) reflects whichever game's roster
+ * snapshot was processed last.
+ */
+export async function getTournamentStats(
+  tournamentId: string,
+): Promise<TournamentStats> {
+  const gameRows = await db
+    .select()
+    .from(games)
+    .where(eq(games.tournamentId, tournamentId));
+
+  const overall = { holds: 0, broken: 0, breaks: 0, opponentHolds: 0 };
+  const playerAgg = new Map<string, TournamentPlayerAccumulator>();
+
+  for (const gameRow of gameRows) {
+    const [pointRows, rosterRows] = await Promise.all([
+      db
+        .select()
+        .from(points)
+        .where(eq(points.gameId, gameRow.id))
+        .orderBy(points.pointNumber),
+      db.select().from(gameRoster).where(eq(gameRoster.gameId, gameRow.id)),
+    ]);
+    const pts = pointRows.map(toPoint);
+
+    const gameOutcomes = teamPointOutcomes(pts);
+    overall.holds += gameOutcomes.holds;
+    overall.broken += gameOutcomes.broken;
+    overall.breaks += gameOutcomes.breaks;
+    overall.opponentHolds += gameOutcomes.opponentHolds;
+
+    const played = pointsPlayed(pts);
+    const perPlayerOutcomes = playerPointOutcomes(pts);
+    const perPlayerOnOff = playerOnOffComponents(pts);
+    const rosterById = new Map(rosterRows.map((r) => [r.playerId, toRosterEntry(r)]));
+
+    for (const [playerId, count] of Object.entries(played)) {
+      const rosterEntry = rosterById.get(playerId);
+      if (!rosterEntry) continue;
+      const entry = playerAgg.get(playerId) ?? {
+        playerId,
+        name: rosterEntry.name,
+        nickname: rosterEntry.nickname,
+        genderMatch: rosterEntry.genderMatch,
+        role: rosterEntry.role,
+        pointsPlayed: 0,
+        oPointsPlayed: 0,
+        dPointsPlayed: 0,
+        oPlusMinus: 0,
+        dPlusMinus: 0,
+        onOff: {
+          onOCount: 0,
+          onONet: 0,
+          offOCount: 0,
+          offONet: 0,
+          onDCount: 0,
+          onDNet: 0,
+          offDCount: 0,
+          offDNet: 0,
+        },
+      };
+      entry.pointsPlayed += count;
+      const o = perPlayerOutcomes[playerId];
+      if (o) {
+        entry.oPointsPlayed += o.oPointsPlayed;
+        entry.dPointsPlayed += o.dPointsPlayed;
+        entry.oPlusMinus += o.oPlusMinus;
+        entry.dPlusMinus += o.dPlusMinus;
+      }
+      const onOff = perPlayerOnOff[playerId];
+      if (onOff) {
+        entry.onOff.onOCount += onOff.onOCount;
+        entry.onOff.onONet += onOff.onONet;
+        entry.onOff.offOCount += onOff.offOCount;
+        entry.onOff.offONet += onOff.offONet;
+        entry.onOff.onDCount += onOff.onDCount;
+        entry.onOff.onDNet += onOff.onDNet;
+        entry.onOff.offDCount += onOff.offDCount;
+        entry.onOff.offDNet += onOff.offDNet;
+      }
+      entry.name = rosterEntry.name;
+      entry.nickname = rosterEntry.nickname;
+      entry.genderMatch = rosterEntry.genderMatch;
+      entry.role = rosterEntry.role;
+      playerAgg.set(playerId, entry);
+    }
+  }
+
+  const players = Array.from(playerAgg.values()).map(({ onOff, ...rest }) => ({
+    ...rest,
+    ...onOffDiff(onOff),
+  }));
+
+  return { ...overall, players };
 }
 
 /** Attaches Game.currentScore/currentPointNumber for an in_progress game (the

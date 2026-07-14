@@ -320,6 +320,9 @@ export const routes: Route[] = [
   route("GET", "/tournaments/:id/games", async (_req, { id }) =>
     json(await q.listTournamentGames(id!)),
   ),
+  route("GET", "/tournaments/:id/stats", async (_req, { id }) =>
+    json(await q.getTournamentStats(id!)),
+  ),
   route("POST", "/games", async (req) => {
     const body = await parseBody(
       req,

@@ -136,12 +136,15 @@ export function teamPointOutcomes(points: Point[]): TeamPointOutcomes {
 }
 
 /**
- * Per-player +/- split by the side each point started on: +1 for a point
- * their team won, -1 for one it lost, tallied separately for O-starting and
- * D-starting points. Same counting convention as pointsPlayed — starting
- * lineup only, sub-ins excluded, only completed points.
+ * Per-player points played and +/- split by the side each point started on:
+ * a count plus a net (+1 for a point their team won, -1 for one it lost) for
+ * O-starting and D-starting points each. Same counting convention as
+ * pointsPlayed — starting lineup only, sub-ins excluded, only completed
+ * points.
  */
 export interface PlayerPointOutcomes {
+  oPointsPlayed: number;
+  dPointsPlayed: number;
   oPlusMinus: number;
   dPlusMinus: number;
 }
@@ -154,13 +157,92 @@ export function playerPointOutcomes(
     if (p.result === undefined) continue;
     const delta = p.result === "us" ? 1 : -1;
     for (const id of p.lineup) {
-      const entry = out[id] ?? { oPlusMinus: 0, dPlusMinus: 0 };
-      if (p.od === "O") entry.oPlusMinus += delta;
-      else entry.dPlusMinus += delta;
+      const entry = out[id] ?? {
+        oPointsPlayed: 0,
+        dPointsPlayed: 0,
+        oPlusMinus: 0,
+        dPlusMinus: 0,
+      };
+      if (p.od === "O") {
+        entry.oPointsPlayed++;
+        entry.oPlusMinus += delta;
+      } else {
+        entry.dPointsPlayed++;
+        entry.dPlusMinus += delta;
+      }
       out[id] = entry;
     }
   }
   return out;
+}
+
+/**
+ * Raw on/off components for one player, split O vs D: the point count and net
+ * +/- for points they started ("on") vs every other completed point of that
+ * same starting side ("off" — the team's performance without them). Kept as
+ * separate counts/nets (rather than a single ratio) so a tournament-wide
+ * aggregate can sum them across games before ever dividing — averaging
+ * per-game ratios directly would weight a 3-point game the same as a
+ * 20-point one.
+ */
+export interface PlayerOnOffComponents {
+  onOCount: number;
+  onONet: number;
+  offOCount: number;
+  offONet: number;
+  onDCount: number;
+  onDNet: number;
+  offDCount: number;
+  offDNet: number;
+}
+
+export function playerOnOffComponents(
+  points: Point[],
+): Record<string, PlayerOnOffComponents> {
+  const team = teamPointOutcomes(points);
+  const totalOCount = team.holds + team.broken;
+  const totalONet = team.holds - team.broken;
+  const totalDCount = team.breaks + team.opponentHolds;
+  const totalDNet = team.breaks - team.opponentHolds;
+
+  const perPlayer = playerPointOutcomes(points);
+  const out: Record<string, PlayerOnOffComponents> = {};
+  for (const [playerId, stats] of Object.entries(perPlayer)) {
+    out[playerId] = {
+      onOCount: stats.oPointsPlayed,
+      onONet: stats.oPlusMinus,
+      offOCount: totalOCount - stats.oPointsPlayed,
+      offONet: totalONet - stats.oPlusMinus,
+      onDCount: stats.dPointsPlayed,
+      onDNet: stats.dPlusMinus,
+      offDCount: totalDCount - stats.dPointsPlayed,
+      offDNet: totalDNet - stats.dPlusMinus,
+    };
+  }
+  return out;
+}
+
+function rate(net: number, count: number): number | null {
+  return count > 0 ? net / count : null;
+}
+
+/**
+ * The on/off differential: the team's average point net per point with this
+ * player on the line, minus its average net per point without them — for O
+ * and D starting points separately. Null when either side has no points to
+ * average (e.g. they've played every O point so far, or none at all).
+ */
+export function onOffDiff(
+  c: PlayerOnOffComponents,
+): { oOnOffDiff: number | null; dOnOffDiff: number | null } {
+  const onO = rate(c.onONet, c.onOCount);
+  const offO = rate(c.offONet, c.offOCount);
+  const onD = rate(c.onDNet, c.onDCount);
+  const offD = rate(c.offDNet, c.offDCount);
+  return {
+    oOnOffDiff: onO !== null && offO !== null ? onO - offO : null,
+    dOnOffDiff: onD !== null && offD !== null ? onD - offD : null,
+  };
 }
 
 // ── Half score derivation — §4.2 ─────────────────────────────────────────────

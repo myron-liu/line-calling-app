@@ -11,6 +11,8 @@ import {
   halfScoreForCap,
   teamPointOutcomes,
   playerPointOutcomes,
+  playerOnOffComponents,
+  onOffDiff,
 } from "./rules";
 import { validateLine, lineWarnings, type LinePlayer } from "./validation";
 import type { GenderRatio, Point } from "./types";
@@ -202,7 +204,7 @@ describe("teamPointOutcomes / playerPointOutcomes (recap stats)", () => {
     });
   });
 
-  test("playerPointOutcomes tallies +/- per player, split by O/D starting side", () => {
+  test("playerPointOutcomes tallies points played and +/- per player, split by O/D starting side", () => {
     const log = [
       mk(1, "O", ["a", "b"], "us"), // O hold: a,b +1 O
       mk(2, "O", ["a", "c"], "them"), // O broken: a,c -1 O
@@ -210,9 +212,24 @@ describe("teamPointOutcomes / playerPointOutcomes (recap stats)", () => {
       mk(4, "D", ["a", "c"], "them"), // D opponent held: a,c -1 D
     ];
     const out = playerPointOutcomes(log);
-    expect(out["a"]).toEqual({ oPlusMinus: 0, dPlusMinus: 0 });
-    expect(out["b"]).toEqual({ oPlusMinus: 1, dPlusMinus: 1 });
-    expect(out["c"]).toEqual({ oPlusMinus: -1, dPlusMinus: -1 });
+    expect(out["a"]).toEqual({
+      oPointsPlayed: 2,
+      dPointsPlayed: 2,
+      oPlusMinus: 0,
+      dPlusMinus: 0,
+    });
+    expect(out["b"]).toEqual({
+      oPointsPlayed: 1,
+      dPointsPlayed: 1,
+      oPlusMinus: 1,
+      dPlusMinus: 1,
+    });
+    expect(out["c"]).toEqual({
+      oPointsPlayed: 1,
+      dPointsPlayed: 1,
+      oPlusMinus: -1,
+      dPlusMinus: -1,
+    });
   });
 
   test("only completed points count", () => {
@@ -224,6 +241,29 @@ describe("teamPointOutcomes / playerPointOutcomes (recap stats)", () => {
       breaks: 0,
       opponentHolds: 0,
     });
+  });
+
+  test("playerOnOffComponents / onOffDiff: team's net with a player on vs off the line", () => {
+    const log = [
+      mk(1, "O", ["a", "b"], "us"), // hold
+      mk(2, "O", ["a", "c"], "us"), // hold
+      mk(3, "O", ["c", "d"], "them"), // broken
+      mk(4, "O", ["b", "d"], "them"), // broken
+      mk(5, "D", ["a", "e"], "us"), // break
+      mk(6, "D", ["e", "f"], "them"), // opponent held
+    ];
+    const components = playerOnOffComponents(log);
+
+    // "a" only ever played the two O points the team won: team is +1/pt
+    // with them on (2 net / 2 pts) vs -1/pt without (-2 net / 2 pts).
+    expect(onOffDiff(components["a"]!)).toEqual({ oOnOffDiff: 2, dOnOffDiff: 2 });
+    // "d" only ever played the two O points the team lost: mirror image of "a".
+    expect(onOffDiff(components["d"]!)).toEqual({ oOnOffDiff: -2, dOnOffDiff: null });
+    // "b"/"c" each played one win and one loss on O: net wash either way.
+    expect(onOffDiff(components["b"]!).oOnOffDiff).toBe(0);
+    expect(onOffDiff(components["c"]!).oOnOffDiff).toBe(0);
+    // "e" played every single D point, so there's no "off" side to compare to.
+    expect(onOffDiff(components["e"]!).dOnOffDiff).toBeNull();
   });
 });
 

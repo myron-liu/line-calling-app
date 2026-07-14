@@ -2,8 +2,20 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import type { Game, GenderMatch, OD, Point, PlayerPointOutcomes } from "@shared/game-rules";
-import { playerPointOutcomes, teamPointOutcomes } from "@shared/game-rules";
+import type {
+  Game,
+  GenderMatch,
+  OD,
+  Point,
+  PlayerOnOffComponents,
+  PlayerPointOutcomes,
+} from "@shared/game-rules";
+import {
+  onOffDiff,
+  playerOnOffComponents,
+  playerPointOutcomes,
+  teamPointOutcomes,
+} from "@shared/game-rules";
 import { useLiveGame, type LiveGame } from "@/lib/game/useLiveGame";
 import { readTeam } from "@/lib/storage/teams";
 import { findTournament } from "@/lib/storage/tournaments";
@@ -236,6 +248,7 @@ function Recap({ live }: { live: LiveGame }) {
   );
   const outcomes = useMemo(() => teamPointOutcomes(points), [points]);
   const playerOutcomes = useMemo(() => playerPointOutcomes(points), [points]);
+  const onOffComponents = useMemo(() => playerOnOffComponents(points), [points]);
 
   return (
     <section className="space-y-4">
@@ -268,6 +281,7 @@ function Recap({ live }: { live: LiveGame }) {
         roster={roster}
         pointsPlayed={state.pointsPlayed}
         playerOutcomes={playerOutcomes}
+        onOffComponents={onOffComponents}
       />
     </section>
   );
@@ -398,10 +412,12 @@ function PointsPlayedTables({
   roster,
   pointsPlayed,
   playerOutcomes,
+  onOffComponents,
 }: {
   roster: RosterSnapshotEntry[];
   pointsPlayed: Record<string, number>;
   playerOutcomes: Record<string, PlayerPointOutcomes>;
+  onOffComponents: Record<string, PlayerOnOffComponents>;
 }) {
   const [sortMode, setSortMode] = useState<StatSortMode>("points");
   return (
@@ -430,6 +446,7 @@ function PointsPlayedTables({
           roster={roster}
           pointsPlayed={pointsPlayed}
           playerOutcomes={playerOutcomes}
+          onOffComponents={onOffComponents}
           sortMode={sortMode}
         />
         <PointsPlayedTable
@@ -437,6 +454,7 @@ function PointsPlayedTables({
           roster={roster}
           pointsPlayed={pointsPlayed}
           playerOutcomes={playerOutcomes}
+          onOffComponents={onOffComponents}
           sortMode={sortMode}
         />
       </div>
@@ -472,28 +490,44 @@ function formatPlusMinus(n: number): string {
   return n > 0 ? `+${n}` : `${n}`;
 }
 
+function formatOnOffDiff(n: number | null): string {
+  if (n === null) return "—";
+  const rounded = Math.round(n * 100) / 100;
+  return rounded > 0 ? `+${rounded}` : `${rounded}`;
+}
+
 function PointsPlayedTable({
   gender,
   roster,
   pointsPlayed,
   playerOutcomes,
+  onOffComponents,
   sortMode,
 }: {
   gender: GenderMatch;
   roster: RosterSnapshotEntry[];
   pointsPlayed: Record<string, number>;
   playerOutcomes: Record<string, PlayerPointOutcomes>;
+  onOffComponents: Record<string, PlayerOnOffComponents>;
   sortMode: StatSortMode;
 }) {
   const rows = roster
     .filter((p) => p.genderMatch === gender)
     .map((p) => {
       const o = playerOutcomes[p.playerId];
+      const c = onOffComponents[p.playerId];
+      const { oOnOffDiff, dOnOffDiff } = c
+        ? onOffDiff(c)
+        : { oOnOffDiff: null, dOnOffDiff: null };
       return {
         p,
         count: pointsPlayed[p.playerId] ?? 0,
+        oPointsPlayed: o?.oPointsPlayed ?? 0,
+        dPointsPlayed: o?.dPointsPlayed ?? 0,
         oPlusMinus: o?.oPlusMinus ?? 0,
         dPlusMinus: o?.dPlusMinus ?? 0,
+        oOnOffDiff,
+        dOnOffDiff,
       };
     })
     .sort((a, b) => {
@@ -524,28 +558,63 @@ function PointsPlayedTable({
             Pts
           </th>
           <th className="border-b border-line pb-1 text-right text-xs font-semibold uppercase tracking-wide text-faint">
+            D Pts
+          </th>
+          <th className="border-b border-line pb-1 text-right text-xs font-semibold uppercase tracking-wide text-faint">
             D +/-
+          </th>
+          <th className="border-b border-line pb-1 text-right text-xs font-semibold uppercase tracking-wide text-faint">
+            D On/Off
+          </th>
+          <th className="border-b border-line pb-1 text-right text-xs font-semibold uppercase tracking-wide text-faint">
+            O Pts
           </th>
           <th className="border-b border-line pb-1 text-right text-xs font-semibold uppercase tracking-wide text-faint">
             O +/-
           </th>
+          <th className="border-b border-line pb-1 text-right text-xs font-semibold uppercase tracking-wide text-faint">
+            O On/Off
+          </th>
         </tr>
       </thead>
       <tbody>
-        {rows.map(({ p, count, oPlusMinus, dPlusMinus }) => (
-          <tr key={p.playerId}>
-            <td className="border-b border-line py-1">{displayName(p)}</td>
-            <td className="border-b border-line py-1 text-right tabular-nums text-muted">
-              {count}
-            </td>
-            <td className="border-b border-line py-1 text-right tabular-nums text-muted">
-              {formatPlusMinus(dPlusMinus)}
-            </td>
-            <td className="border-b border-line py-1 text-right tabular-nums text-muted">
-              {formatPlusMinus(oPlusMinus)}
-            </td>
-          </tr>
-        ))}
+        {rows.map(
+          ({
+            p,
+            count,
+            oPointsPlayed,
+            dPointsPlayed,
+            oPlusMinus,
+            dPlusMinus,
+            oOnOffDiff,
+            dOnOffDiff,
+          }) => (
+            <tr key={p.playerId}>
+              <td className="border-b border-line py-1">{displayName(p)}</td>
+              <td className="border-b border-line py-1 text-right tabular-nums text-muted">
+                {count}
+              </td>
+              <td className="border-b border-line py-1 text-right tabular-nums text-muted">
+                {dPointsPlayed}
+              </td>
+              <td className="border-b border-line py-1 text-right tabular-nums text-muted">
+                {formatPlusMinus(dPlusMinus)}
+              </td>
+              <td className="border-b border-line py-1 text-right tabular-nums text-muted">
+                {formatOnOffDiff(dOnOffDiff)}
+              </td>
+              <td className="border-b border-line py-1 text-right tabular-nums text-muted">
+                {oPointsPlayed}
+              </td>
+              <td className="border-b border-line py-1 text-right tabular-nums text-muted">
+                {formatPlusMinus(oPlusMinus)}
+              </td>
+              <td className="border-b border-line py-1 text-right tabular-nums text-muted">
+                {formatOnOffDiff(oOnOffDiff)}
+              </td>
+            </tr>
+          ),
+        )}
       </tbody>
     </table>
   );

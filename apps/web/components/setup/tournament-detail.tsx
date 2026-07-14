@@ -215,12 +215,20 @@ export function TournamentDetail({ tournamentId }: { tournamentId: string }) {
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="font-medium">Games</h2>
-          <Link
-            href={`/tournaments/${tournamentId}/lines`}
-            className="text-sm font-medium text-emerald-700 dark:text-emerald-400"
-          >
-            Lines &amp; pods →
-          </Link>
+          <div className="flex items-center gap-3">
+            <Link
+              href={`/tournaments/${tournamentId}/stats`}
+              className="text-sm font-medium text-emerald-700 dark:text-emerald-400"
+            >
+              Stats →
+            </Link>
+            <Link
+              href={`/tournaments/${tournamentId}/lines`}
+              className="text-sm font-medium text-emerald-700 dark:text-emerald-400"
+            >
+              Lines &amp; pods →
+            </Link>
+          </div>
         </div>
         <GameList
           games={games}
