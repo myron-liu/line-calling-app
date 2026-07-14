@@ -792,10 +792,10 @@ export function GameList({
                   {statusLabel[g.status]} ·{" "}
                   {g.gameCap === null ? "time cap" : `cap ${g.gameCap}`}
                 </span>
-                {g.status === "in_progress" && g.currentScore && (
+                {g.status !== "scheduled" && g.currentScore && (
                   <span className="font-semibold tabular-nums text-fg">
                     {g.currentScore.our}–{g.currentScore.their}
-                    {g.currentPointNumber !== undefined && (
+                    {g.status === "in_progress" && g.currentPointNumber !== undefined && (
                       <span className="font-normal text-faint">
                         {" "}
                         · Point {g.currentPointNumber}

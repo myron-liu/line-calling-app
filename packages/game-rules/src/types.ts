@@ -161,11 +161,12 @@ export interface Game {
   version: number;
 
   /**
-   * Read-only summary of the live point log, attached only by the
-   * team/tournament game-list endpoints and only while `status` is
-   * "in_progress" (derived server-side from the same point log the client
+   * Read-only summary of the point log, attached only by the team/tournament
+   * game-list endpoints — the running score while `status` is "in_progress",
+   * or the final score once "completed" (unset for "scheduled", which has no
+   * points yet). Derived server-side from the same point log the client
    * itself would derive from — see apps/server/src/db/queries.ts's
-   * attachLiveScore). Not part of the persisted row, and never sent on
+   * attachLiveScore. Not part of the persisted row, and never sent on
    * create/update/sync responses.
    */
   currentScore?: { our: number; their: number };

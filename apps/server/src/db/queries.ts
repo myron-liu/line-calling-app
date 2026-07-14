@@ -737,11 +737,12 @@ export async function listTournamentGames(
   return Promise.all(rows.map(attachLiveScore));
 }
 
-/** Attaches Game.currentScore/currentPointNumber for an in_progress game (see
- *  the comment on that field in types.ts) — a no-op for any other status. */
+/** Attaches Game.currentScore/currentPointNumber for an in_progress game (the
+ *  running score) or a completed one (the final score) — see the comment on
+ *  that field in types.ts. A no-op for a scheduled game, which has no points. */
 async function attachLiveScore(row: typeof games.$inferSelect): Promise<Game> {
   const game = toGame(row);
-  if (row.status !== "in_progress") return game;
+  if (row.status === "scheduled") return game;
   const pointRows = await db
     .select()
     .from(points)
@@ -807,6 +808,17 @@ export async function syncGame(
   const [existing] = await db.select().from(games).where(eq(games.id, gameId));
   if (!existing) return { ok: false, reason: "not_found" };
 
+  // A game is "completed" once the engine says so — either the coach manually
+  // ended it, or the score reached the cap on its own. The client stops
+  // showing the live caller for either reason (both flip `phase` to
+  // "completed"), but only `endedManually` used to be persisted here, so a
+  // game that finished purely by reaching its cap stayed "in_progress" in the
+  // DB forever. Re-deriving from the incoming log every sync also means
+  // undoing a manually-ended game (or a score that dips back under the cap)
+  // correctly un-completes it, matching the client's own undo semantics.
+  const live = deriveLiveGameState(toGame(existing), input.points, input.meta);
+  const completed = input.meta.endedManually || live.phase === "completed";
+
   // The WHERE clause re-checks the version atomically with the write, so two
   // concurrent syncs can't both pass a check done earlier in JS and both land:
   // only the first to commit bumps the version and returns a row.
@@ -817,7 +829,7 @@ export async function syncGame(
       ourTimeoutsRemaining: input.meta.ourTimeoutsRemaining,
       theirTimeoutsRemaining: input.meta.theirTimeoutsRemaining,
       endedManually: input.meta.endedManually,
-      status: input.meta.endedManually ? "completed" : existing.status,
+      status: completed ? "completed" : "in_progress",
       version: existing.version + 1,
       updatedAt: new Date(),
     })
