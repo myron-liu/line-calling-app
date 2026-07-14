@@ -743,6 +743,26 @@ const statusLabel: Record<GameStatus, string> = {
   completed: "Completed",
 };
 
+const MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+function ordinal(n: number): string {
+  const j = n % 10;
+  const k = n % 100;
+  if (j === 1 && k !== 11) return `${n}st`;
+  if (j === 2 && k !== 12) return `${n}nd`;
+  if (j === 3 && k !== 13) return `${n}rd`;
+  return `${n}th`;
+}
+
+/** "2026-07-11" -> "July 11th 2026". */
+function formatGameDate(dateStr: string): string {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return `${MONTH_NAMES[m! - 1]} ${ordinal(d!)} ${y}`;
+}
+
 export function GameList({
   games,
   emptyLabel,
@@ -808,6 +828,7 @@ export function GameList({
               <p className="truncate font-medium">vs {g.opponentName}</p>
               <p className="flex flex-wrap items-center gap-1.5 text-xs text-faint">
                 <span>
+                  {g.gameDate && `${formatGameDate(g.gameDate)} · `}
                   {g.startTime && `${g.startTime} · `}
                   {statusLabel[g.status]} ·{" "}
                   {g.gameCap === null ? "time cap" : `cap ${g.gameCap}`}
