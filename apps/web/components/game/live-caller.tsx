@@ -348,9 +348,10 @@ function LineBuilder({
     return { mmp, wmp };
   };
   // Same tally, but skipping anyone currently injured/inactive — used to decide
-  // whether a pod fits this point's caps. A pod isn't hidden just because one of
-  // its players is out; mergeWithCaps below already skips them when applying, so
-  // whether it *fits* should be judged by who'd actually get added.
+  // whether a pod fits this point's caps (a roster-inactive player, e.g.
+  // removed from check-in, is excluded the same way an injured one is here,
+  // even though a *line/pod containing an injured player* is now hidden
+  // outright below rather than judged by what's left of it).
   const eligibleComposition = (playerIds: string[]) => {
     let mmp = 0;
     let wmp = 0;
@@ -372,8 +373,13 @@ function LineBuilder({
 
   // A line/pod fits if its MMP and WMP counts each stay within the point's caps.
   // For a full 7 this forces an exact ratio match; for a pod it just has to fit.
+  // Any line/pod with a currently-injured player is hidden outright rather
+  // than shown with that player silently dropped — the coach picks a
+  // different quick-fill (or builds the line manually) instead of applying
+  // one that's quietly missing someone.
   const quickLines = savedLines
     .filter((line) => !line.hidden)
+    .filter((line) => !line.playerIds.some((id) => allById.get(id)?.injured))
     .map((line) => ({ line, ...composition(line.playerIds) }))
     .filter((x) => {
       if (x.line.playerIds.length < 1 || x.line.playerIds.length > 7) return false;
