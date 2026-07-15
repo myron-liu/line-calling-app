@@ -3,6 +3,8 @@
 // so these calls are allowed to reject — callers surface the error rather than
 // falling back to a local cache.
 
+import { supabase } from "../supabase/client";
+
 const BASE_URL =
   process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") ?? "http://localhost:4000";
 
@@ -30,9 +32,19 @@ async function request<T>(
   path: string,
   body?: unknown,
 ): Promise<T> {
+  // getSession() reads from the client's in-memory/localStorage cache and
+  // silently refreshes if the token's expired — not a network round trip on
+  // every call.
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  const headers: Record<string, string> = {};
+  if (body !== undefined) headers["content-type"] = "application/json";
+  if (session) headers["authorization"] = `Bearer ${session.access_token}`;
+
   const res = await fetch(`${BASE_URL}${path}`, {
     method,
-    headers: body !== undefined ? { "content-type": "application/json" } : undefined,
+    headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) {

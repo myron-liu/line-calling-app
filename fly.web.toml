@@ -10,6 +10,8 @@ primary_region = 'sjc'
   dockerfile = 'apps/web/Dockerfile'
   [build.args]
     NEXT_PUBLIC_API_URL = 'https://line-calling-server.fly.dev'
+    NEXT_PUBLIC_SUPABASE_URL = 'https://yhsbtilcnehxybbklwlu.supabase.co'
+    NEXT_PUBLIC_SUPABASE_ANON_KEY = 'sb_publishable_LB4vuza2vbiTXp2vHfmNiA_JeBT3Knf'
 
 [http_service]
   internal_port = 3100

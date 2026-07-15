@@ -30,6 +30,7 @@ import type {
   SavedLine,
   Substitution,
   Team,
+  TeamManager,
   Tournament,
 } from "@shared/game-rules";
 import { db } from "./client";
@@ -39,6 +40,7 @@ import {
   players,
   points,
   savedLines,
+  teamManagers,
   teams,
   tournamentRoster,
   tournaments,
@@ -46,9 +48,15 @@ import {
 
 // ── Teams ──────────────────────────────────────────────────────────────────────
 
-export async function listTeams(): Promise<Team[]> {
-  const rows = await db.select().from(teams);
-  return rows.map(toTeam);
+/** Teams a given phone number manages — replaces an unfiltered "all teams"
+ *  list now that every team is gated by its manager list (§4.0). */
+export async function listTeamsForManager(phone: string): Promise<Team[]> {
+  const rows = await db
+    .select({ team: teams })
+    .from(teamManagers)
+    .innerJoin(teams, eq(teamManagers.teamId, teams.id))
+    .where(eq(teamManagers.phone, phone));
+  return rows.map((r) => toTeam(r.team));
 }
 
 export async function getTeam(id: string): Promise<Team | null> {
@@ -75,11 +83,55 @@ export async function deleteTeam(id: string): Promise<void> {
 function toTeam(row: typeof teams.$inferSelect): Team {
   return {
     id: row.id,
-    ownerId: row.ownerId,
     name: row.name,
     division: row.division as Division,
     createdAt: row.createdAt.toISOString(),
   };
+}
+
+// ── Team managers ────────────────────────────────────────────────────────────
+// Flat, many-to-many membership (§4.0) — no roles/tiers. Authorization for
+// every other route is just "does a (teamId, phone) row exist here."
+
+export async function isTeamManager(
+  teamId: string,
+  phone: string,
+): Promise<boolean> {
+  const [row] = await db
+    .select({ id: teamManagers.id })
+    .from(teamManagers)
+    .where(and(eq(teamManagers.teamId, teamId), eq(teamManagers.phone, phone)));
+  return !!row;
+}
+
+export async function listTeamManagers(teamId: string): Promise<TeamManager[]> {
+  const rows = await db
+    .select()
+    .from(teamManagers)
+    .where(eq(teamManagers.teamId, teamId));
+  return rows.map((r) => ({ phone: r.phone, createdAt: r.createdAt.toISOString() }));
+}
+
+export async function addTeamManager(teamId: string, phone: string): Promise<void> {
+  await db
+    .insert(teamManagers)
+    .values({ id: `${teamId}:${phone}`, teamId, phone })
+    .onConflictDoNothing();
+}
+
+/** Throws if `phone` isn't actually a manager, or if removing them would
+ *  leave the team with zero managers — never let a team get orphaned. */
+export async function removeTeamManager(
+  teamId: string,
+  phone: string,
+): Promise<{ ok: true } | { ok: false; reason: "not_found" | "last_manager" }> {
+  const current = await listTeamManagers(teamId);
+  if (!current.some((m) => m.phone === phone)) return { ok: false, reason: "not_found" };
+  if (current.length <= 1) return { ok: false, reason: "last_manager" };
+  await db
+    .delete(teamManagers)
+    .where(and(eq(teamManagers.teamId, teamId), eq(teamManagers.phone, phone)));
+  return { ok: true };
 }
 
 // ── Players ──────────────────────────────────────────────────────────────────
@@ -96,6 +148,17 @@ export interface PlayerInput {
 export async function listPlayers(teamId: string): Promise<Player[]> {
   const rows = await db.select().from(players).where(eq(players.teamId, teamId));
   return rows.map(toPlayer);
+}
+
+/** Single-column lookup for authorization (see routes.ts's authedRoute) — a
+ *  player isn't otherwise fetched by id alone anywhere, so this stays cheap
+ *  rather than reusing a heavier existing query. */
+export async function getPlayerTeamId(id: string): Promise<string | null> {
+  const [row] = await db
+    .select({ teamId: players.teamId })
+    .from(players)
+    .where(eq(players.id, id));
+  return row?.teamId ?? null;
 }
 
 export async function createPlayer(
@@ -372,6 +435,15 @@ export async function listSavedLines(teamId: string): Promise<SavedLine[]> {
   return rows.map(toSavedLine);
 }
 
+/** Single-column lookup for authorization (see routes.ts's authedRoute). */
+export async function getSavedLineTeamId(id: string): Promise<string | null> {
+  const [row] = await db
+    .select({ teamId: savedLines.teamId })
+    .from(savedLines)
+    .where(eq(savedLines.id, id));
+  return row?.teamId ?? null;
+}
+
 const normalizeLineName = (name: string): string => name.trim().toLowerCase();
 
 /** True iff both lists are the same set of players, order aside. */
@@ -560,6 +632,18 @@ export interface CreateGameInput {
   startTime?: string;
   opposingCoachName?: string;
   roster: RosterSnapshotEntry[];
+}
+
+/** Single-column lookup for authorization (see routes.ts's authedRoute) — kept
+ *  intentionally cheap since PUT /games/:id/sync (the hottest route in the
+ *  app) authorizes via this on every point/undo/redo, not via getGameFull's
+ *  roster+points joins. */
+export async function getGameTeamId(id: string): Promise<string | null> {
+  const [row] = await db
+    .select({ teamId: games.teamId })
+    .from(games)
+    .where(eq(games.id, id));
+  return row?.teamId ?? null;
 }
 
 export async function createGame(input: CreateGameInput): Promise<GameFull> {

@@ -25,6 +25,7 @@ import {
   type SavedLine,
 } from "@shared/game-rules";
 import { api, apiUrl } from "@/lib/api/client";
+import { supabase } from "@/lib/supabase/client";
 import { newId } from "@/lib/id";
 import {
   readGameConfig,
@@ -63,6 +64,46 @@ import {
 
 /** Saved lines are team-scoped (§4.3). */
 const savedLinesScope = (game: Game): string => game.teamId;
+
+/** Opens an EventSource authenticated via a `?token=` query param — native
+ *  EventSource can't set an Authorization header, so the server accepts a
+ *  token this way instead (see apps/server/src/auth.ts). Reconnects with a
+ *  fresh token when the session refreshes, since an open connection isn't
+ *  reauthorized mid-stream but a dropped one's native auto-reconnect would
+ *  otherwise keep retrying the same now-stale token. Returns a cleanup
+ *  function for the caller's `useEffect`. */
+function openAuthedEventSource(
+  path: string,
+  onMessage: (ev: MessageEvent) => void,
+): () => void {
+  let source: EventSource | null = null;
+  let cancelled = false;
+
+  const connect = async () => {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (cancelled || !session) return;
+    source = new EventSource(
+      `${apiUrl(path)}?token=${encodeURIComponent(session.access_token)}`,
+    );
+    source.onmessage = onMessage;
+  };
+  connect();
+
+  const { data: sub } = supabase.auth.onAuthStateChange((event) => {
+    if (event === "TOKEN_REFRESHED" || event === "SIGNED_IN") {
+      source?.close();
+      connect();
+    }
+  });
+
+  return () => {
+    cancelled = true;
+    source?.close();
+    sub.subscription.unsubscribe();
+  };
+}
 
 /** What a RedoAction's underlying transition is called in the UI, so the
  *  undo/redo buttons can say precisely what they'll do (e.g. "Undo line" on
@@ -321,8 +362,7 @@ export function useLiveGame(gameId: string): LiveGameResult {
   // guard, a coach making changes alone on one device would routinely see
   // "updated from another device" for their own actions.
   useEffect(() => {
-    const source = new EventSource(apiUrl(`/games/${gameId}/events`));
-    source.onmessage = (ev) => {
+    return openAuthedEventSource(`/games/${gameId}/events`, (ev) => {
       if (!ev.data) return;
       let data: { type: "updated" | "conflict"; version: number };
       try {
@@ -338,8 +378,7 @@ export function useLiveGame(gameId: string): LiveGameResult {
         .get<GameFull>(`/games/${gameId}/full`)
         .then((full) => adoptServerState(full, false))
         .catch(() => {});
-    };
-    return () => source.close();
+    });
   }, [gameId, adoptServerState]);
 
   // Saved-lines updates (see apps/server/src/sse.ts's savedLinesChannel):
@@ -353,12 +392,10 @@ export function useLiveGame(gameId: string): LiveGameResult {
   const teamId = game?.teamId;
   useEffect(() => {
     if (!teamId) return;
-    const source = new EventSource(apiUrl(`/teams/${teamId}/saved-lines/events`));
-    source.onmessage = (ev) => {
+    return openAuthedEventSource(`/teams/${teamId}/saved-lines/events`, (ev) => {
       if (!ev.data) return;
       readSavedLines(teamId).then(setSavedLines);
-    };
-    return () => source.close();
+    });
   }, [teamId]);
 
   // Best-effort background sync, once on load: pick up roster changes made

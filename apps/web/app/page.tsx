@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 
-// v0 is public — no auth. Home goes straight to the teams list.
+// Home goes straight to the teams list (AuthGate in the root layout handles
+// signing in first if needed — see components/app-shell.tsx).
 export default function HomePage() {
   redirect("/teams");
 }

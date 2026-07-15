@@ -11,6 +11,7 @@ import type {
   Player,
   Role,
   Team,
+  TeamManager,
   Tournament,
 } from "@shared/game-rules";
 import {
@@ -22,6 +23,11 @@ import {
   updatePlayer,
   type PlayerInput,
 } from "@/lib/storage/teams";
+import {
+  addTeamManager,
+  readTeamManagers,
+  removeTeamManager,
+} from "@/lib/storage/managers";
 import {
   createTournament,
   readTournaments,
@@ -46,13 +52,15 @@ interface TeamDetailData {
   team: Team;
   players: Player[];
   tournaments: Tournament[];
+  managers: TeamManager[];
 }
 
 function sameTeamDetail(a: TeamDetailData, b: TeamDetailData): boolean {
   return (
     sameJson(a.team, b.team) &&
     sameById(a.players, b.players) &&
-    sameById(a.tournaments, b.tournaments)
+    sameById(a.tournaments, b.tournaments) &&
+    sameJson(a.managers, b.managers)
   );
 }
 
@@ -60,19 +68,23 @@ export function TeamDetail({ teamId }: { teamId: string }) {
   const { data, refresh } = useCachedFetch<TeamDetailData | null>(
     keys.teamDetail(teamId),
     async () => {
-      const [t, players, tournaments] = await Promise.all([
+      const [t, players, tournaments, managers] = await Promise.all([
         readTeam(teamId),
         readPlayers(teamId),
         readTournaments(teamId),
+        readTeamManagers(teamId),
       ]);
-      return t ? { team: t, players, tournaments } : null;
+      if (!t) return null;
+      // Stable order for display/comparison — the server doesn't guarantee one.
+      managers.sort((a, b) => a.phone.localeCompare(b.phone));
+      return { team: t, players, tournaments, managers };
     },
     (a, b) => (a === null || b === null ? a === b : sameTeamDetail(a, b)),
     [teamId],
   );
 
   if (!data) return <p className="text-muted">Loading…</p>;
-  const { team, players, tournaments } = data;
+  const { team, players, tournaments, managers } = data;
 
   return (
     <section className="space-y-8">
@@ -82,6 +94,8 @@ export function TeamDetail({ teamId }: { teamId: string }) {
           {team.division}
         </span>
       </div>
+
+      <Managers teamId={teamId} managers={managers} onChange={refresh} />
 
       <Roster
         teamId={teamId}
@@ -99,6 +113,88 @@ export function TeamDetail({ teamId }: { teamId: string }) {
         }}
       />
     </section>
+  );
+}
+
+// ── Managers ─────────────────────────────────────────────────────────────────
+// Flat, many-to-many phone-number membership (§4.0) — any manager can add or
+// remove another. The server rejects removing the last remaining manager.
+
+function Managers({
+  teamId,
+  managers,
+  onChange,
+}: {
+  teamId: string;
+  managers: TeamManager[];
+  onChange: () => void;
+}) {
+  const [phone, setPhone] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const add = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await addTeamManager(teamId, phone.trim());
+      setPhone("");
+      await onChange();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (managerPhone: string) => {
+    setError(null);
+    try {
+      await removeTeamManager(teamId, managerPhone);
+      await onChange();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <h2 className="font-medium">Managers ({managers.length})</h2>
+      <ul className="space-y-1">
+        {managers.map((m) => (
+          <li
+            key={m.phone}
+            className="flex items-center justify-between rounded-md border border-line px-3 py-1.5 text-sm"
+          >
+            <span>{m.phone}</span>
+            <button
+              onClick={() => remove(m.phone)}
+              disabled={managers.length <= 1}
+              title={managers.length <= 1 ? "A team needs at least one manager" : "Remove"}
+              className="text-xs font-medium text-red-600 hover:opacity-80 disabled:opacity-30 dark:text-red-400"
+            >
+              Remove
+            </button>
+          </li>
+        ))}
+      </ul>
+      <div className="flex gap-2">
+        <input
+          value={phone}
+          onChange={(e) => setPhone(e.target.value)}
+          placeholder="+14155550123"
+          className="flex-1 rounded border border-line-strong px-2 py-1.5 text-sm"
+        />
+        <button
+          onClick={add}
+          disabled={busy || !phone.trim()}
+          className="rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white disabled:bg-disabled"
+        >
+          Add manager
+        </button>
+      </div>
+      {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
+    </div>
   );
 }
 

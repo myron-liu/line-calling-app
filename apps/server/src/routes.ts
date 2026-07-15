@@ -9,6 +9,7 @@ import { newId } from "./id";
 import { corsHeaders, HttpError, json, notFound, parseBody } from "./http";
 import * as q from "./db/queries";
 import { broadcast, savedLinesChannel, subscribe, unsubscribe } from "./sse";
+import { verifyAuthPhone } from "./auth";
 
 export type Handler = (
   req: Request,
@@ -89,6 +90,11 @@ const gameMetaSchema = z.object({
   endedManually: z.boolean(),
 });
 
+// Loose E.164 check for a manager phone submitted via the API — the JWT's own
+// `phone` claim is normalized separately in auth.ts; this is for phone
+// numbers a caller types into the "add manager" UI.
+const phoneNumber = z.string().regex(/^\+[1-9]\d{6,14}$/, "Must be E.164, e.g. +14155550123");
+
 function wrap(handler: Handler): Handler {
   return async (req, params) => {
     try {
@@ -106,6 +112,51 @@ const route = (method: string, path: string, handler: Handler): Route => ({
   path,
   handler: wrap(handler),
 });
+
+/** Resolves which team a request concerns, for the authorization check below.
+ *  Returns `null` if the request doesn't resolve to a real team (→ 403,
+ *  same as "not a manager" — every id here is a client-generated UUID, so
+ *  there's no meaningful distinction to leak between "doesn't exist" and
+ *  "not yours"). Receives an already-`.clone()`d request so routes that need
+ *  to inspect the body (POST /games) can safely do so without consuming the
+ *  body the real handler still needs to parse. */
+type TeamResolver = (
+  req: Request,
+  params: Record<string, string>,
+) => Promise<string | null>;
+
+type AuthedHandler = (
+  req: Request,
+  params: Record<string, string>,
+  phone: string,
+) => Response | Promise<Response>;
+
+/** Verifies the caller's Supabase session, then (unless `resolveTeamId` is
+ *  `null`) checks they're a manager of whichever team the request concerns
+ *  before calling `handler`. Pass `null` only for routes with no existing
+ *  team to check yet (creating a team) — every other route must resolve one. */
+function authedRoute(
+  method: string,
+  path: string,
+  resolveTeamId: TeamResolver | null,
+  handler: AuthedHandler,
+): Route {
+  return route(method, path, async (req, params) => {
+    const phone = await verifyAuthPhone(req);
+    if (resolveTeamId) {
+      const teamId = await resolveTeamId(req.clone() as Request, params);
+      if (!teamId || !(await q.isTeamManager(teamId, phone))) {
+        throw new HttpError(403, "Not a manager of this team");
+      }
+    }
+    return handler(req, params, phone);
+  });
+}
+
+const teamIdParam: TeamResolver = async (_req, params) => params.id ?? null;
+const tournamentTeamId: TeamResolver = async (_req, { id }) =>
+  (await q.getTournament(id!))?.teamId ?? null;
+const gameTeamId: TeamResolver = async (_req, { id }) => q.getGameTeamId(id!);
 
 /** A bare SSE stream over one sse.ts channel — used for both a game's own
  *  conflict/update notifications and (separately) a team's saved-lines
@@ -145,25 +196,54 @@ function sseStream(channel: string): Response {
 
 export const routes: Route[] = [
   // ── Teams ──────────────────────────────────────────────────────────────────
-  route("GET", "/teams", async () => json(await q.listTeams())),
-  route("POST", "/teams", async (req) => {
+  // Not a single-resource check — the teams a phone can see are exactly the
+  // ones it manages, so this is a filtered list, not a per-team auth check.
+  authedRoute("GET", "/teams", null, async (_req, _params, phone) =>
+    json(await q.listTeamsForManager(phone)),
+  ),
+  authedRoute("POST", "/teams", null, async (req, _params, phone) => {
     const body = await parseBody(req, z.object({ name: z.string().min(1), division }));
-    return json(await q.createTeam({ id: newId(), ...body }), 201);
+    const team = await q.createTeam({ id: newId(), ...body });
+    await q.addTeamManager(team.id, phone); // creator becomes the first manager
+    return json(team, 201);
   }),
-  route("GET", "/teams/:id", async (_req, { id }) => {
+  authedRoute("GET", "/teams/:id", teamIdParam, async (_req, { id }) => {
     const team = await q.getTeam(id!);
     return team ? json(team) : notFound();
   }),
-  route("DELETE", "/teams/:id", async (_req, { id }) => {
+  authedRoute("DELETE", "/teams/:id", teamIdParam, async (_req, { id }) => {
     await q.deleteTeam(id!);
     return json({ ok: true });
   }),
 
+  // ── Team managers ────────────────────────────────────────────────────────
+  authedRoute("GET", "/teams/:id/managers", teamIdParam, async (_req, { id }) =>
+    json(await q.listTeamManagers(id!)),
+  ),
+  authedRoute("POST", "/teams/:id/managers", teamIdParam, async (req, { id }) => {
+    const body = await parseBody(req, z.object({ phone: phoneNumber }));
+    await q.addTeamManager(id!, body.phone);
+    return json(await q.listTeamManagers(id!), 201);
+  }),
+  authedRoute(
+    "DELETE",
+    "/teams/:id/managers/:phone",
+    teamIdParam,
+    async (_req, { id, phone }) => {
+      const result = await q.removeTeamManager(id!, decodeURIComponent(phone!));
+      if (!result.ok) {
+        if (result.reason === "not_found") return notFound();
+        return json({ error: "last_manager", message: "A team needs at least one manager" }, 400);
+      }
+      return json(await q.listTeamManagers(id!));
+    },
+  ),
+
   // ── Players ────────────────────────────────────────────────────────────────
-  route("GET", "/teams/:id/players", async (_req, { id }) =>
+  authedRoute("GET", "/teams/:id/players", teamIdParam, async (_req, { id }) =>
     json(await q.listPlayers(id!)),
   ),
-  route("POST", "/teams/:id/players", async (req, { id }) => {
+  authedRoute("POST", "/teams/:id/players", teamIdParam, async (req, { id }) => {
     const body = await parseBody(
       req,
       z.object({
@@ -177,31 +257,41 @@ export const routes: Route[] = [
     );
     return json(await q.createPlayer(newId(), id!, body), 201);
   }),
-  route("PATCH", "/players/:id", async (req, { id }) => {
-    const body = await parseBody(
-      req,
-      z.object({
-        name: z.string().min(1).optional(),
-        nickname: z.string().optional(),
-        genderMatch: genderMatch.optional(),
-        role: role.optional(),
-        odPreference: odPreference.optional(),
-        jerseyNumber: z.number().optional(),
-      }),
-    );
-    const player = await q.updatePlayer(id!, body);
-    return player ? json(player) : notFound();
-  }),
-  route("DELETE", "/players/:id", async (_req, { id }) => {
-    await q.deletePlayer(id!);
-    return json({ ok: true });
-  }),
+  authedRoute(
+    "PATCH",
+    "/players/:id",
+    async (_req, { id }) => q.getPlayerTeamId(id!),
+    async (req, { id }) => {
+      const body = await parseBody(
+        req,
+        z.object({
+          name: z.string().min(1).optional(),
+          nickname: z.string().optional(),
+          genderMatch: genderMatch.optional(),
+          role: role.optional(),
+          odPreference: odPreference.optional(),
+          jerseyNumber: z.number().optional(),
+        }),
+      );
+      const player = await q.updatePlayer(id!, body);
+      return player ? json(player) : notFound();
+    },
+  ),
+  authedRoute(
+    "DELETE",
+    "/players/:id",
+    async (_req, { id }) => q.getPlayerTeamId(id!),
+    async (_req, { id }) => {
+      await q.deletePlayer(id!);
+      return json({ ok: true });
+    },
+  ),
 
   // ── Tournaments ────────────────────────────────────────────────────────────
-  route("GET", "/teams/:id/tournaments", async (_req, { id }) =>
+  authedRoute("GET", "/teams/:id/tournaments", teamIdParam, async (_req, { id }) =>
     json(await q.listTournaments(id!)),
   ),
-  route("POST", "/teams/:id/tournaments", async (req, { id }) => {
+  authedRoute("POST", "/teams/:id/tournaments", teamIdParam, async (req, { id }) => {
     const body = await parseBody(
       req,
       z
@@ -221,17 +311,17 @@ export const routes: Route[] = [
       201,
     );
   }),
-  route("GET", "/tournaments/:id", async (_req, { id }) => {
+  authedRoute("GET", "/tournaments/:id", tournamentTeamId, async (_req, { id }) => {
     const t = await q.getTournament(id!);
     return t ? json(t) : notFound();
   }),
-  route("DELETE", "/tournaments/:id", async (_req, { id }) => {
+  authedRoute("DELETE", "/tournaments/:id", tournamentTeamId, async (_req, { id }) => {
     await q.deleteTournament(id!);
     return json({ ok: true });
   }),
 
   // ── Tournament check-in roster ─────────────────────────────────────────────
-  route("GET", "/tournaments/:id/roster", async (_req, { id }) =>
+  authedRoute("GET", "/tournaments/:id/roster", tournamentTeamId, async (_req, { id }) =>
     json(await q.listTournamentRoster(id!)),
   ),
   // Batched check-in: the client buffers present/injured taps in localStorage
@@ -240,7 +330,7 @@ export const routes: Route[] = [
   // game under the tournament once, and returns the resulting roster — the
   // client just adopts whatever comes back rather than reconciling conflicts
   // itself.
-  route("PUT", "/tournaments/:id/roster", async (req, { id }) => {
+  authedRoute("PUT", "/tournaments/:id/roster", tournamentTeamId, async (req, { id }) => {
     const body = await parseBody(
       req,
       z.object({
@@ -261,10 +351,10 @@ export const routes: Route[] = [
   }),
 
   // ── Saved lines ────────────────────────────────────────────────────────────
-  route("GET", "/teams/:id/saved-lines", async (_req, { id }) =>
+  authedRoute("GET", "/teams/:id/saved-lines", teamIdParam, async (_req, { id }) =>
     json(await q.listSavedLines(id!)),
   ),
-  route("POST", "/teams/:id/saved-lines", async (req, { id }) => {
+  authedRoute("POST", "/teams/:id/saved-lines", teamIdParam, async (req, { id }) => {
     const body = await parseBody(
       req,
       z.object({
@@ -278,73 +368,98 @@ export const routes: Route[] = [
     broadcast(savedLinesChannel(id!), { type: "updated" });
     return json(line, 201);
   }),
-  route("PATCH", "/saved-lines/:id", async (req, { id }) => {
-    const body = await parseBody(
-      req,
-      z.object({
-        name: z.string().optional(),
-        playerIds: z.array(z.string()).optional(),
-        color: lineColor.nullable().optional(),
-        side: odPreference.nullable().optional(),
-        hidden: z.boolean().optional(),
-      }),
-    );
-    const line = await q.updateSavedLine(id!, body);
-    if (!line) return notFound();
-    broadcast(savedLinesChannel(line.teamId), { type: "updated" });
-    return json(line);
-  }),
-  route("POST", "/saved-lines/:id/use", async (_req, { id }) => {
-    const line = await q.incrementSavedLineUsage(id!);
-    if (!line) return notFound();
-    broadcast(savedLinesChannel(line.teamId), { type: "updated" });
-    return json(line);
-  }),
-  route("DELETE", "/saved-lines/:id", async (_req, { id }) => {
-    const teamId = await q.deleteSavedLine(id!);
-    if (teamId) broadcast(savedLinesChannel(teamId), { type: "updated" });
-    return json({ ok: true });
-  }),
+  authedRoute(
+    "PATCH",
+    "/saved-lines/:id",
+    async (_req, { id }) => q.getSavedLineTeamId(id!),
+    async (req, { id }) => {
+      const body = await parseBody(
+        req,
+        z.object({
+          name: z.string().optional(),
+          playerIds: z.array(z.string()).optional(),
+          color: lineColor.nullable().optional(),
+          side: odPreference.nullable().optional(),
+          hidden: z.boolean().optional(),
+        }),
+      );
+      const line = await q.updateSavedLine(id!, body);
+      if (!line) return notFound();
+      broadcast(savedLinesChannel(line.teamId), { type: "updated" });
+      return json(line);
+    },
+  ),
+  authedRoute(
+    "POST",
+    "/saved-lines/:id/use",
+    async (_req, { id }) => q.getSavedLineTeamId(id!),
+    async (_req, { id }) => {
+      const line = await q.incrementSavedLineUsage(id!);
+      if (!line) return notFound();
+      broadcast(savedLinesChannel(line.teamId), { type: "updated" });
+      return json(line);
+    },
+  ),
+  authedRoute(
+    "DELETE",
+    "/saved-lines/:id",
+    async (_req, { id }) => q.getSavedLineTeamId(id!),
+    async (_req, { id }) => {
+      const teamId = await q.deleteSavedLine(id!);
+      if (teamId) broadcast(savedLinesChannel(teamId), { type: "updated" });
+      return json({ ok: true });
+    },
+  ),
   // SSE stream of saved-lines updates for one team (see sse.ts) — entirely
   // separate from any game's own conflict/version notifications, so an
   // in-progress live game never treats a pod being saved/edited elsewhere as
-  // its own state going stale.
-  route("GET", "/teams/:id/saved-lines/events", async (_req, { id }) =>
+  // its own state going stale. Auth via ?token= query param (see auth.ts) —
+  // native EventSource can't set headers.
+  authedRoute("GET", "/teams/:id/saved-lines/events", teamIdParam, async (_req, { id }) =>
     sseStream(savedLinesChannel(id!)),
   ),
 
   // ── Games ──────────────────────────────────────────────────────────────────
-  route("GET", "/teams/:id/games", async (_req, { id }) =>
+  authedRoute("GET", "/teams/:id/games", teamIdParam, async (_req, { id }) =>
     json(await q.listTeamGames(id!)),
   ),
-  route("GET", "/tournaments/:id/games", async (_req, { id }) =>
+  authedRoute("GET", "/tournaments/:id/games", tournamentTeamId, async (_req, { id }) =>
     json(await q.listTournamentGames(id!)),
   ),
-  route("GET", "/tournaments/:id/stats", async (_req, { id }) =>
+  authedRoute("GET", "/tournaments/:id/stats", tournamentTeamId, async (_req, { id }) =>
     json(await q.getTournamentStats(id!)),
   ),
-  route("POST", "/games", async (req) => {
-    const body = await parseBody(
-      req,
-      z.object({
-        teamId: z.string(),
-        tournamentId: z.string().optional(),
-        opponentName: z.string().min(1),
-        gameCap,
-        halfScore: z.number().nullable(),
-        timeoutsPerHalf: z.number(),
-        startingOD: od.optional(),
-        startingGenderRatio: genderRatio.optional(),
-        fieldNumber: z.string().optional(),
-        gameDate: z.string().optional(),
-        startTime: z.string().optional(),
-        opposingCoachName: z.string().optional(),
-        roster: z.array(rosterEntry),
-      }),
-    );
-    return json(await q.createGame({ id: newId(), ...body }), 201);
-  }),
-  route("POST", "/games/:id/resolve-flip", async (req, { id }) => {
+  authedRoute(
+    "POST",
+    "/games",
+    async (req) => {
+      const body: unknown = await req.json().catch(() => null);
+      const teamId = (body as { teamId?: unknown } | null)?.teamId;
+      return typeof teamId === "string" ? teamId : null;
+    },
+    async (req) => {
+      const body = await parseBody(
+        req,
+        z.object({
+          teamId: z.string(),
+          tournamentId: z.string().optional(),
+          opponentName: z.string().min(1),
+          gameCap,
+          halfScore: z.number().nullable(),
+          timeoutsPerHalf: z.number(),
+          startingOD: od.optional(),
+          startingGenderRatio: genderRatio.optional(),
+          fieldNumber: z.string().optional(),
+          gameDate: z.string().optional(),
+          startTime: z.string().optional(),
+          opposingCoachName: z.string().optional(),
+          roster: z.array(rosterEntry),
+        }),
+      );
+      return json(await q.createGame({ id: newId(), ...body }), 201);
+    },
+  ),
+  authedRoute("POST", "/games/:id/resolve-flip", gameTeamId, async (req, { id }) => {
     const body = await parseBody(
       req,
       z.object({
@@ -358,16 +473,16 @@ export const routes: Route[] = [
     broadcast(id!, { type: "updated", version: game.version });
     return json(game);
   }),
-  route("POST", "/games/:id/undo-flip", async (_req, { id }) => {
+  authedRoute("POST", "/games/:id/undo-flip", gameTeamId, async (_req, { id }) => {
     const game = await q.undoFlip(id!);
     broadcast(id!, { type: "updated", version: game.version });
     return json(game);
   }),
-  route("GET", "/games/:id/full", async (_req, { id }) => {
+  authedRoute("GET", "/games/:id/full", gameTeamId, async (_req, { id }) => {
     const full = await q.getGameFull(id!);
     return full ? json(full) : notFound();
   }),
-  route("PATCH", "/games/:id/metadata", async (req, { id }) => {
+  authedRoute("PATCH", "/games/:id/metadata", gameTeamId, async (req, { id }) => {
     const body = await parseBody(
       req,
       z.object({
@@ -383,7 +498,7 @@ export const routes: Route[] = [
     broadcast(id!, { type: "updated", version: game.version });
     return json(game);
   }),
-  route("PUT", "/games/:id/sync", async (req, { id }) => {
+  authedRoute("PUT", "/games/:id/sync", gameTeamId, async (req, { id }) => {
     const body = await parseBody(
       req,
       z.object({
@@ -413,9 +528,10 @@ export const routes: Route[] = [
   }),
   // SSE stream of conflict/update notifications for one game (see sse.ts) —
   // lets a connected client find out its local state is stale in real time,
-  // rather than only discovering it via a rejected write.
-  route("GET", "/games/:id/events", async (_req, { id }) => sseStream(id!)),
-  route("DELETE", "/games/:id", async (_req, { id }) => {
+  // rather than only discovering it via a rejected write. Auth via ?token=
+  // query param (see auth.ts) — native EventSource can't set headers.
+  authedRoute("GET", "/games/:id/events", gameTeamId, async (_req, { id }) => sseStream(id!)),
+  authedRoute("DELETE", "/games/:id", gameTeamId, async (_req, { id }) => {
     await q.deleteGame(id!);
     return json({ ok: true });
   }),

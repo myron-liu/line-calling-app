@@ -22,11 +22,28 @@ const createdAt = () =>
 
 export const teams = pgTable("teams", {
   id: id(),
-  ownerId: text("owner_id").notNull().default("public"), // v0: no auth
   name: text("name").notNull(),
   division: text("division").notNull(), // "mixed" | "open" | "women"
   createdAt: createdAt(),
 });
+
+// Many-to-many: a phone number (the verified identity from a Supabase phone-
+// auth JWT — see src/auth.ts) can manage multiple teams, and a team can have
+// multiple managers. Flat role — no tiers. Whoever creates a team is inserted
+// here automatically; any existing manager can add/remove others (see
+// routes.ts's manager-list routes).
+export const teamManagers = pgTable(
+  "team_managers",
+  {
+    id: id(),
+    teamId: text("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    phone: text("phone").notNull(), // canonical E.164, e.g. "+14155550123"
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("team_managers_phone_team_unique").on(t.phone, t.teamId)],
+);
 
 export const players = pgTable("players", {
   id: id(),

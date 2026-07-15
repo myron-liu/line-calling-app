@@ -43,6 +43,13 @@
       "when": 1783828488842,
       "tag": "0005_elite_ted_forrester",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1784098172218,
+      "tag": "0006_polite_northstar",
+      "breakpoints": true
     }
   ]
 }

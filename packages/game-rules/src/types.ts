@@ -42,9 +42,15 @@ export interface User {
 
 export interface Team {
   id: string;
-  ownerId: string;
   name: string;
   division: Division;
+  createdAt: string;
+}
+
+/** One phone number's membership on a team (§4.0) — flat role, no tiers. A
+ *  team can have multiple managers; a manager can manage multiple teams. */
+export interface TeamManager {
+  phone: string;
   createdAt: string;
 }
 

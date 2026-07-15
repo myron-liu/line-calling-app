@@ -1,5 +1,7 @@
 # Build from the repo root: docker build -f apps/web/Dockerfile
-#   --build-arg NEXT_PUBLIC_API_URL=https://your-api.example.com .
+#   --build-arg NEXT_PUBLIC_API_URL=https://your-api.example.com
+#   --build-arg NEXT_PUBLIC_SUPABASE_URL=https://xxxxxxxxxxxx.supabase.co
+#   --build-arg NEXT_PUBLIC_SUPABASE_ANON_KEY=... .
 # NEXT_PUBLIC_* vars are baked in at build time, not read at runtime, so the API
 # URL must be supplied as a build arg (defaults to localhost for local testing).
 FROM oven/bun:1 AS deps
@@ -19,6 +21,10 @@ COPY apps/web apps/web
 
 ARG NEXT_PUBLIC_API_URL=http://localhost:4000
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+ARG NEXT_PUBLIC_SUPABASE_URL
+ENV NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
+ARG NEXT_PUBLIC_SUPABASE_ANON_KEY
+ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
 WORKDIR /app/apps/web
 # A fresh version on every build with real code changes (this RUN sits after
 # COPY apps/web above, so Docker's layer cache only re-executes it when

@@ -41,8 +41,16 @@ Env vars (see `apps/server/.env.example`):
 | Var | Value |
 |---|---|
 | `DATABASE_URL` | Supabase transaction pooler URI (port 6543) |
+| `SUPABASE_URL` | same project's URL, e.g. `https://xxxxxxxxxxxx.supabase.co` — used to verify Supabase Auth JWTs (see `src/auth.ts`), no separate credentials needed |
 | `PORT` | port to listen on (most hosts inject this for you) |
 | `CORS_ORIGIN` | the deployed web app's origin, e.g. `https://your-app.vercel.app` |
+
+Every route requires a valid Supabase phone-auth session and (for anything
+scoped to a team) membership in that team's manager list — see §4.0 in
+`line-calling-app-design.md` and `src/auth.ts`/`src/routes.ts`'s `authedRoute`.
+Enable the **Phone** provider under Authentication → Providers in the Supabase
+dashboard, with an SMS provider (Twilio, etc.) configured there, before this
+will actually deliver OTP codes.
 
 Build and run with the provided Dockerfile (build context is the **repo root**,
 since the server needs the `packages/game-rules` workspace package):
@@ -60,30 +68,35 @@ does not run migrations on boot (see the comment in `apps/server/Dockerfile`).
 
 ## 3. `apps/web`
 
-Env var: `NEXT_PUBLIC_API_URL` — the public URL of the deployed server (e.g.
-`https://line-calling-server.fly.dev`). This is a build-time value (Next.js
-inlines `NEXT_PUBLIC_*` vars at build), so it must be set wherever the build
-runs, not just at runtime.
+Env vars — all build-time values (Next.js inlines `NEXT_PUBLIC_*` vars at
+build), so they must be set wherever the build runs, not just at runtime:
 
-**Vercel:** import the repo, set the root directory to `apps/web`, add
-`NEXT_PUBLIC_API_URL` as a project env var. Vercel's Bun/Next detection handles
-the rest.
+| Var | Value |
+|---|---|
+| `NEXT_PUBLIC_API_URL` | the public URL of the deployed server, e.g. `https://line-calling-server.fly.dev` |
+| `NEXT_PUBLIC_SUPABASE_URL` | same Supabase project as above |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Project Settings → API → "anon public" key — safe to expose to the browser |
 
-**Docker:** build from the repo root with the API URL as a build arg:
+**Vercel:** import the repo, set the root directory to `apps/web`, add all
+three as project env vars. Vercel's Bun/Next detection handles the rest.
+
+**Docker:** build from the repo root with these as build args:
 
 ```bash
 docker build -f apps/web/Dockerfile \
   --build-arg NEXT_PUBLIC_API_URL=https://line-calling-server.fly.dev \
+  --build-arg NEXT_PUBLIC_SUPABASE_URL=https://xxxxxxxxxxxx.supabase.co \
+  --build-arg NEXT_PUBLIC_SUPABASE_ANON_KEY=... \
   -t line-calling-web .
 docker run -p 3100:3100 line-calling-web
 ```
 
-**Fly.io:** this build arg is persisted in `fly.web.toml`'s `[build.args]`
+**Fly.io:** these build args are persisted in `fly.web.toml`'s `[build.args]`
 rather than passed on the `fly deploy` command line — a plain `fly deploy`
-without it silently falls back to the Dockerfile's `localhost:4000` default,
-which breaks every API call from a real browser. If you ever add another
-`NEXT_PUBLIC_*` var, add it there too rather than relying on remembering a
-CLI flag on every deploy.
+without them silently falls back to the Dockerfile's defaults (`localhost:4000`
+for the API URL, empty for the Supabase vars), which breaks every API call and
+login from a real browser. If you ever add another `NEXT_PUBLIC_*` var, add it
+there too rather than relying on remembering a CLI flag on every deploy.
 
 The Dockerfile also bakes in `NEXT_PUBLIC_APP_VERSION` automatically (a build
 timestamp — no action needed) so a client with an older build cached in

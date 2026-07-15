@@ -1,6 +1,7 @@
-// Teams and their players (§4.1), persisted via the API server. v0 is public and
-// single-device, so there is no owner/auth — teams are just created and listed.
-// This is "setup" data (§13.12): online-only, no offline fallback.
+// Teams and their players (§4.1), persisted via the API server. Every route is
+// gated by phone-auth + team membership (§4.0, see lib/storage/managers.ts) —
+// `readTeams` returns only the teams the signed-in phone manages. This is
+// "setup" data (§13.12): online-only, no offline fallback.
 
 import type {
   Division,
