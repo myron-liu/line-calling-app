@@ -414,6 +414,14 @@ function LineBuilder({
       ? justPlayedLineId
       : null;
 
+  // Quick lines starts open iff a saved line/pod was used last point (checked
+  // against the raw previous lineup, not `justPlayedId` — the new point's
+  // selection starts empty, so it'd never overlap yet). Controlled (not just
+  // an initial value) so the coach can still freely toggle it afterward.
+  const [quickLinesOpen, setQuickLinesOpen] = useState(
+    () => justPlayedLineId !== null,
+  );
+
   // Add players up to the caps, deduping and skipping ineligible ones.
   const mergeWithCaps = (base: string[], incoming: string[]) => {
     const next = [...base];
@@ -491,6 +499,17 @@ function LineBuilder({
 
   return (
     <div className="space-y-3">
+      <SavedLinesBar
+        lines={quickLines}
+        appliedIds={appliedLineIds}
+        justPlayedId={justPlayedId}
+        ratioLabel={need ? `${maxMMP}M / ${maxWMP}W` : "any 7"}
+        onApply={applyLine}
+        note={applyNote}
+        open={quickLinesOpen}
+        onOpenChange={setQuickLinesOpen}
+      />
+
       <div className="flex items-center justify-between text-sm">
         <span className="font-medium">
           {selected.length}/7 selected
@@ -579,15 +598,6 @@ function LineBuilder({
         wmpFull={wmpFull}
         isMixed={isMixed}
         onToggle={toggle}
-      />
-
-      <SavedLinesBar
-        lines={quickLines}
-        appliedIds={appliedLineIds}
-        justPlayedId={justPlayedId}
-        ratioLabel={need ? `${maxMMP}M / ${maxWMP}W` : "any 7"}
-        onApply={applyLine}
-        note={applyNote}
       />
 
       <InjuryManager
@@ -1062,6 +1072,8 @@ function SavedLinesBar({
   ratioLabel,
   onApply,
   note,
+  open,
+  onOpenChange,
 }: {
   lines: QuickLine[];
   appliedIds: Set<string>;
@@ -1069,60 +1081,68 @@ function SavedLinesBar({
   ratioLabel: string;
   onApply: (line: SavedLine) => void;
   note: string | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }) {
   return (
-    <div className="space-y-2 rounded-lg border border-line p-2">
-      <span className="text-xs font-medium uppercase tracking-wide text-faint">
+    <details
+      open={open}
+      onToggle={(e) => onOpenChange(e.currentTarget.open)}
+      className="rounded-lg border border-line p-2"
+    >
+      <summary className="cursor-pointer text-xs font-medium uppercase tracking-wide text-faint">
         Quick lines · {ratioLabel}
-      </span>
+      </summary>
 
-      {lines.length === 0 ? (
-        <p className="text-xs text-faint">
-          No saved lines or pods fit this ratio yet.
-        </p>
-      ) : (
-        <div className="flex flex-wrap gap-2">
-          {lines.map(({ line, mmp, wmp }) => {
-            const isPod = line.playerIds.length < 7;
-            const isApplied = appliedIds.has(line.id);
-            const tone = line.color
-              ? LINE_COLOR_CHIP[line.color]
-              : isPod
-                ? "border-violet-300 bg-violet-50 text-violet-800 dark:border-violet-500/40 dark:bg-violet-500/10 dark:text-violet-300"
-                : "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-300";
-            return (
-              <span
-                key={line.id}
-                className={`flex flex-col items-start gap-0.5 rounded-lg border py-1 pl-3 pr-3 text-sm ${tone} ${
-                  isApplied ? "ring-2 ring-offset-1 ring-offset-surface ring-current" : ""
-                }`}
-              >
-                <button
-                  onClick={() => onApply(line)}
-                  aria-pressed={isApplied}
-                  title={isApplied ? "Tap to remove" : "Tap to apply"}
-                  className="flex items-center gap-1.5 font-medium"
+      <div className="mt-2 space-y-2">
+        {lines.length === 0 ? (
+          <p className="text-xs text-faint">
+            No saved lines or pods fit this ratio yet.
+          </p>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {lines.map(({ line, mmp, wmp }) => {
+              const isPod = line.playerIds.length < 7;
+              const isApplied = appliedIds.has(line.id);
+              const tone = line.color
+                ? LINE_COLOR_CHIP[line.color]
+                : isPod
+                  ? "border-violet-300 bg-violet-50 text-violet-800 dark:border-violet-500/40 dark:bg-violet-500/10 dark:text-violet-300"
+                  : "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-300";
+              return (
+                <span
+                  key={line.id}
+                  className={`flex flex-col items-start gap-0.5 rounded-lg border py-1 pl-3 pr-3 text-sm ${tone} ${
+                    isApplied ? "ring-2 ring-offset-1 ring-offset-surface ring-current" : ""
+                  }`}
                 >
-                  {isApplied && <span aria-hidden>✓</span>}
-                  {line.name}
-                  <span className="text-[10px] font-normal opacity-70">
-                    {isPod ? `pod` : "line"}
-                    {line.side && line.side !== "both" ? ` · ${line.side}` : ""}
-                    {" · "}
-                    {mmp}M/{wmp}W · {line.useCount ?? 0}×
-                  </span>
-                </button>
-                {line.id === justPlayedId && (
-                  <span className="text-[10px] font-medium opacity-80">Just played</span>
-                )}
-              </span>
-            );
-          })}
-        </div>
-      )}
+                  <button
+                    onClick={() => onApply(line)}
+                    aria-pressed={isApplied}
+                    title={isApplied ? "Tap to remove" : "Tap to apply"}
+                    className="flex items-center gap-1.5 font-medium"
+                  >
+                    {isApplied && <span aria-hidden>✓</span>}
+                    {line.name}
+                    <span className="text-[10px] font-normal opacity-70">
+                      {isPod ? `pod` : "line"}
+                      {line.side && line.side !== "both" ? ` · ${line.side}` : ""}
+                      {" · "}
+                      {mmp}M/{wmp}W · {line.useCount ?? 0}×
+                    </span>
+                  </button>
+                  {line.id === justPlayedId && (
+                    <span className="text-[10px] font-medium opacity-80">Just played</span>
+                  )}
+                </span>
+              );
+            })}
+          </div>
+        )}
 
-      {note && <p className="text-xs text-amber-600 dark:text-amber-400">{note}</p>}
-    </div>
+        {note && <p className="text-xs text-amber-600 dark:text-amber-400">{note}</p>}
+      </div>
+    </details>
   );
 }
 
