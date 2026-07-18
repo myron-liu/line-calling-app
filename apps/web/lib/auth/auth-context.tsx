@@ -23,6 +23,10 @@ interface AuthContextValue {
   loading: boolean;
   signInWithPhone: (phone: string) => Promise<{ error: string | null }>;
   verifyOtp: (phone: string, code: string) => Promise<{ error: string | null }>;
+  /** Stores a display name on the session's user_metadata (§4.0 sign-up) —
+   *  there's no separate profile table, so this is the only place a name
+   *  lives. Requires an active session (call after verifyOtp succeeds). */
+  updateProfile: (firstName: string, lastName: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
 }
 
@@ -57,6 +61,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { error: error?.message ?? null };
   };
 
+  const updateProfile = async (firstName: string, lastName: string) => {
+    const { error } = await supabase.auth.updateUser({
+      data: { first_name: firstName, last_name: lastName },
+    });
+    return { error: error?.message ?? null };
+  };
+
   const signOut = async () => {
     await supabase.auth.signOut();
   };
@@ -68,7 +79,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ session, phone, loading, signInWithPhone, verifyOtp, signOut }}
+      value={{
+        session,
+        phone,
+        loading,
+        signInWithPhone,
+        verifyOtp,
+        updateProfile,
+        signOut,
+      }}
     >
       {children}
     </AuthContext.Provider>
