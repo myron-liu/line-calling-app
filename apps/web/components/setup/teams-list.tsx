@@ -48,19 +48,17 @@ export function TeamsList() {
   return (
     <section className="space-y-6">
       <div className="space-y-2">
-        {firstName && (
-          <p className="flex items-center gap-1.5 text-sm text-muted">
-            Hello, {firstName}!
-            <button
-              onClick={() => setEditingName(true)}
-              aria-label="Edit your name"
-              title="Edit your name"
-              className="text-faint hover:text-fg"
-            >
-              <EditIcon />
-            </button>
-          </p>
-        )}
+        <p className="flex items-center gap-1.5 text-sm text-muted">
+          {firstName ? `Hello, ${firstName}!` : "Add your name"}
+          <button
+            onClick={() => setEditingName(true)}
+            aria-label="Edit your name"
+            title="Edit your name"
+            className="text-faint hover:text-fg"
+          >
+            <EditIcon />
+          </button>
+        </p>
         <h1 className="text-xl font-semibold">Your teams</h1>
         <p className="text-sm text-muted">
           Line Calling helps ultimate frisbee coaches build gender-ratio-compliant
