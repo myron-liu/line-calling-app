@@ -45,6 +45,18 @@ export const teamManagers = pgTable(
   (t) => [uniqueIndex("team_managers_phone_team_unique").on(t.phone, t.teamId)],
 );
 
+// Display name for a verified phone identity (§4.0's User) — separate from
+// Supabase Auth's own user_metadata copy of the same name (set at sign-up,
+// see lib/auth/auth-context.tsx's updateProfile) so the server can join it
+// into team_managers listings without needing the Supabase Admin API. Phone
+// is the natural key: one profile per verified identity, upserted on sign-up.
+export const users = pgTable("users", {
+  phone: text("phone").primaryKey(), // canonical E.164
+  firstName: text("first_name").notNull(),
+  lastName: text("last_name").notNull(),
+  createdAt: createdAt(),
+});
+
 export const players = pgTable("players", {
   id: id(),
   teamId: text("team_id")

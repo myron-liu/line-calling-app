@@ -52,6 +52,11 @@ export interface Team {
 export interface TeamManager {
   phone: string;
   createdAt: string;
+  /** Present only if this phone has signed up with a name (see the `User`
+   *  record joined in on the server) — a manager added by phone alone, who
+   *  hasn't signed up yet, has neither. */
+  firstName?: string;
+  lastName?: string;
 }
 
 export interface Player {

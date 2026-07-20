@@ -9,6 +9,9 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useAuth } from "@/lib/auth/auth-context";
+import { updateMyProfile } from "@/lib/storage/me";
+import { formatUsPhone, usPhoneE164 } from "@/lib/phone";
+import { UsPhoneInput } from "./us-phone-input";
 
 export function AuthGate({ children }: { children: ReactNode }) {
   const { phone, loading } = useAuth();
@@ -16,16 +19,6 @@ export function AuthGate({ children }: { children: ReactNode }) {
   if (loading) return null;
   if (phone) return <>{children}</>;
   return <LoginScreen />;
-}
-
-/** US-only formatting for now — a leading "+1" is assumed and baked into the
- *  submitted E.164 number rather than typed, since every manager so far is a
- *  US number. Revisit if/when a non-US manager needs to sign in. */
-function formatUsPhone(digits: string): string {
-  if (digits.length === 0) return "";
-  if (digits.length < 4) return `(${digits}`;
-  if (digits.length < 7) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
-  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
 }
 
 type Mode = "signin" | "signup";
@@ -52,7 +45,7 @@ function LoginScreen() {
     }
   }, [step, mode]);
 
-  const e164 = `+1${digits}`;
+  const e164 = usPhoneE164(digits);
   const phoneComplete = digits.length === 10;
   const canSubmitInfo =
     phoneComplete && (mode === "signin" || (firstName.trim() && lastName.trim()));
@@ -86,7 +79,13 @@ function LoginScreen() {
       return;
     }
     if (mode === "signup") {
-      await updateProfile(firstName.trim(), lastName.trim());
+      // Supabase's own copy (drives "Hello, X!") and our DB's copy (drives
+      // showing this name to other managers, see team-detail.tsx) — both
+      // need the session that verifyOtp just established.
+      await Promise.all([
+        updateProfile(firstName.trim(), lastName.trim()),
+        updateMyProfile(firstName.trim(), lastName.trim()),
+      ]);
     }
     setSubmitting(false);
     // On success, onAuthStateChange fires and AuthGate re-renders past this screen.
@@ -146,20 +145,7 @@ function LoginScreen() {
           )}
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-muted">Phone number</span>
-            <div className="flex items-center rounded border border-line-strong">
-              <span className="pl-3 text-muted">+1</span>
-              <input
-                ref={phoneRef}
-                type="tel"
-                autoComplete="tel-national"
-                inputMode="numeric"
-                value={formatUsPhone(digits)}
-                onChange={(e) => setDigits(e.target.value.replace(/\D/g, "").slice(0, 10))}
-                onKeyDown={(e) => e.key === "Enter" && sendCode()}
-                placeholder="(415) 555-0123"
-                className="min-w-0 flex-1 bg-transparent px-2 py-2 outline-none"
-              />
-            </div>
+            <UsPhoneInput digits={digits} onDigitsChange={setDigits} onEnter={sendCode} inputRef={phoneRef} />
           </label>
           <button
             onClick={sendCode}

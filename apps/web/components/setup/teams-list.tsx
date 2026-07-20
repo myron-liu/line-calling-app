@@ -6,8 +6,11 @@ import type { Division, Team } from "@shared/game-rules";
 import { createTeam, readTeams } from "@/lib/storage/teams";
 import { sameById, useCachedFetch } from "@/lib/cache";
 import { keys } from "@/lib/storage/keys";
+import { useAuth } from "@/lib/auth/auth-context";
 
 export function TeamsList() {
+  const { session } = useAuth();
+  const firstName = session?.user.user_metadata?.first_name as string | undefined;
   const { data: teams, error: fetchError, refresh } = useCachedFetch<Team[]>(
     keys.teams,
     readTeams,
@@ -41,6 +44,7 @@ export function TeamsList() {
   return (
     <section className="space-y-6">
       <div className="space-y-2">
+        {firstName && <p className="text-sm text-muted">Hello, {firstName}!</p>}
         <h1 className="text-xl font-semibold">Your teams</h1>
         <p className="text-sm text-muted">
           Line Calling helps ultimate frisbee coaches build gender-ratio-compliant

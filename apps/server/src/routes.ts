@@ -195,6 +195,20 @@ function sseStream(channel: string): Response {
 }
 
 export const routes: Route[] = [
+  // ── Me ─────────────────────────────────────────────────────────────────────
+  // The display name for the caller's own verified phone identity (§4.0) —
+  // called once, right after sign-up verifies the OTP (see
+  // apps/web/components/auth-gate.tsx). No team check: this is about the
+  // caller's own identity, not any team's data.
+  authedRoute("PUT", "/me/profile", null, async (req, _params, phone) => {
+    const body = await parseBody(
+      req,
+      z.object({ firstName: z.string().min(1), lastName: z.string().min(1) }),
+    );
+    const user = await q.upsertUser({ phone, ...body });
+    return json(user);
+  }),
+
   // ── Teams ──────────────────────────────────────────────────────────────────
   // Not a single-resource check — the teams a phone can see are exactly the
   // ones it manages, so this is a filtered list, not a per-team auth check.

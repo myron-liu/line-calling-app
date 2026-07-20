@@ -32,6 +32,7 @@ import type {
   Team,
   TeamManager,
   Tournament,
+  User,
 } from "@shared/game-rules";
 import { db } from "./client";
 import {
@@ -44,6 +45,7 @@ import {
   teams,
   tournamentRoster,
   tournaments,
+  users,
 } from "./schema";
 
 // ── Teams ──────────────────────────────────────────────────────────────────────
@@ -104,12 +106,27 @@ export async function isTeamManager(
   return !!row;
 }
 
+/** Left-joins each manager's display name (§4.0's User, see the `users`
+ *  table) when they've signed up with one — a manager just added by phone
+ *  who hasn't signed up yet has no row there, so firstName/lastName are
+ *  simply omitted rather than blocking the add. */
 export async function listTeamManagers(teamId: string): Promise<TeamManager[]> {
   const rows = await db
-    .select()
+    .select({
+      phone: teamManagers.phone,
+      createdAt: teamManagers.createdAt,
+      firstName: users.firstName,
+      lastName: users.lastName,
+    })
     .from(teamManagers)
+    .leftJoin(users, eq(teamManagers.phone, users.phone))
     .where(eq(teamManagers.teamId, teamId));
-  return rows.map((r) => ({ phone: r.phone, createdAt: r.createdAt.toISOString() }));
+  return rows.map((r) => ({
+    phone: r.phone,
+    createdAt: r.createdAt.toISOString(),
+    firstName: r.firstName ?? undefined,
+    lastName: r.lastName ?? undefined,
+  }));
 }
 
 export async function addTeamManager(teamId: string, phone: string): Promise<void> {
@@ -132,6 +149,39 @@ export async function removeTeamManager(
     .delete(teamManagers)
     .where(and(eq(teamManagers.teamId, teamId), eq(teamManagers.phone, phone)));
   return { ok: true };
+}
+
+// ── Users (display name for a verified phone identity, §4.0) ────────────────
+// Separate from — and a denormalized copy of — the name Supabase Auth itself
+// holds in the session's user_metadata (see the sign-up flow in
+// apps/web/lib/auth/auth-context.tsx). This copy exists purely so the server
+// can join a manager's name into listTeamManagers without needing the
+// Supabase Admin API to look up other users' metadata.
+
+export async function upsertUser(input: {
+  phone: string;
+  firstName: string;
+  lastName: string;
+}): Promise<User> {
+  const [row] = await db
+    .insert(users)
+    .values(input)
+    .onConflictDoUpdate({
+      target: users.phone,
+      set: { firstName: input.firstName, lastName: input.lastName },
+    })
+    .returning();
+  return toUser(row!);
+}
+
+function toUser(row: typeof users.$inferSelect): User {
+  return {
+    id: row.phone,
+    phoneNumber: row.phone,
+    firstName: row.firstName,
+    lastName: row.lastName,
+    createdAt: row.createdAt.toISOString(),
+  };
 }
 
 // ── Players ──────────────────────────────────────────────────────────────────

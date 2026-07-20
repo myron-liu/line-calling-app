@@ -50,6 +50,13 @@
       "when": 1784098172218,
       "tag": "0006_polite_northstar",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1784529998067,
+      "tag": "0007_public_swordsman",
+      "breakpoints": true
     }
   ]
 }

@@ -38,6 +38,8 @@ import {
   type GameMetadataPatch,
 } from "@/lib/storage/games";
 import { Modal } from "@/components/modal";
+import { UsPhoneInput } from "@/components/us-phone-input";
+import { usPhoneE164 } from "@/lib/phone";
 import {
   ROLE_BADGE_COLOR,
   displayName,
@@ -129,16 +131,17 @@ function Managers({
   managers: TeamManager[];
   onChange: () => void;
 }) {
-  const [phone, setPhone] = useState("");
+  const [digits, setDigits] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const add = async () => {
+    if (digits.length !== 10) return;
     setBusy(true);
     setError(null);
     try {
-      await addTeamManager(teamId, phone.trim());
-      setPhone("");
+      await addTeamManager(teamId, usPhoneE164(digits));
+      setDigits("");
       await onChange();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -166,7 +169,12 @@ function Managers({
             key={m.phone}
             className="flex items-center justify-between rounded-md border border-line px-3 py-1.5 text-sm"
           >
-            <span>{m.phone}</span>
+            <span>
+              {m.phone}
+              {m.firstName && m.lastName && (
+                <span className="text-muted"> ({m.firstName} {m.lastName})</span>
+              )}
+            </span>
             <button
               onClick={() => remove(m.phone)}
               disabled={managers.length <= 1}
@@ -179,15 +187,12 @@ function Managers({
         ))}
       </ul>
       <div className="flex gap-2">
-        <input
-          value={phone}
-          onChange={(e) => setPhone(e.target.value)}
-          placeholder="+14155550123"
-          className="flex-1 rounded border border-line-strong px-2 py-1.5 text-sm"
-        />
+        <div className="flex-1">
+          <UsPhoneInput digits={digits} onDigitsChange={setDigits} onEnter={add} />
+        </div>
         <button
           onClick={add}
-          disabled={busy || !phone.trim()}
+          disabled={busy || digits.length !== 10}
           className="rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white disabled:bg-disabled"
         >
           Add manager
