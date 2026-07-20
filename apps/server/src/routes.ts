@@ -365,23 +365,34 @@ export const routes: Route[] = [
   }),
 
   // ── Saved lines ────────────────────────────────────────────────────────────
-  authedRoute("GET", "/teams/:id/saved-lines", teamIdParam, async (_req, { id }) =>
-    json(await q.listSavedLines(id!)),
+  // Tournament-scoped (§4.3) — each tournament has its own independent pool of
+  // lines/pods, since a team often reuses the same roster across several
+  // tournaments with different needs each time.
+  authedRoute(
+    "GET",
+    "/tournaments/:id/saved-lines",
+    tournamentTeamId,
+    async (_req, { id }) => json(await q.listSavedLines(id!)),
   ),
-  authedRoute("POST", "/teams/:id/saved-lines", teamIdParam, async (req, { id }) => {
-    const body = await parseBody(
-      req,
-      z.object({
-        name: z.string().min(1),
-        playerIds: z.array(z.string()).min(1),
-        color: lineColor.nullable().optional(),
-        side: odPreference.nullable().optional(),
-      }),
-    );
-    const line = await q.createSavedLine({ id: newId(), teamId: id!, ...body });
-    broadcast(savedLinesChannel(id!), { type: "updated" });
-    return json(line, 201);
-  }),
+  authedRoute(
+    "POST",
+    "/tournaments/:id/saved-lines",
+    tournamentTeamId,
+    async (req, { id }) => {
+      const body = await parseBody(
+        req,
+        z.object({
+          name: z.string().min(1),
+          playerIds: z.array(z.string()).min(1),
+          color: lineColor.nullable().optional(),
+          side: odPreference.nullable().optional(),
+        }),
+      );
+      const line = await q.createSavedLine({ id: newId(), tournamentId: id!, ...body });
+      broadcast(savedLinesChannel(id!), { type: "updated" });
+      return json(line, 201);
+    },
+  ),
   authedRoute(
     "PATCH",
     "/saved-lines/:id",
@@ -399,7 +410,7 @@ export const routes: Route[] = [
       );
       const line = await q.updateSavedLine(id!, body);
       if (!line) return notFound();
-      broadcast(savedLinesChannel(line.teamId), { type: "updated" });
+      broadcast(savedLinesChannel(line.tournamentId), { type: "updated" });
       return json(line);
     },
   ),
@@ -410,7 +421,7 @@ export const routes: Route[] = [
     async (_req, { id }) => {
       const line = await q.incrementSavedLineUsage(id!);
       if (!line) return notFound();
-      broadcast(savedLinesChannel(line.teamId), { type: "updated" });
+      broadcast(savedLinesChannel(line.tournamentId), { type: "updated" });
       return json(line);
     },
   ),
@@ -419,18 +430,21 @@ export const routes: Route[] = [
     "/saved-lines/:id",
     async (_req, { id }) => q.getSavedLineTeamId(id!),
     async (_req, { id }) => {
-      const teamId = await q.deleteSavedLine(id!);
-      if (teamId) broadcast(savedLinesChannel(teamId), { type: "updated" });
+      const tournamentId = await q.deleteSavedLine(id!);
+      if (tournamentId) broadcast(savedLinesChannel(tournamentId), { type: "updated" });
       return json({ ok: true });
     },
   ),
-  // SSE stream of saved-lines updates for one team (see sse.ts) — entirely
-  // separate from any game's own conflict/version notifications, so an
-  // in-progress live game never treats a pod being saved/edited elsewhere as
-  // its own state going stale. Auth via ?token= query param (see auth.ts) —
-  // native EventSource can't set headers.
-  authedRoute("GET", "/teams/:id/saved-lines/events", teamIdParam, async (_req, { id }) =>
-    sseStream(savedLinesChannel(id!)),
+  // SSE stream of saved-lines updates for one tournament (see sse.ts) —
+  // entirely separate from any game's own conflict/version notifications, so
+  // an in-progress live game never treats a pod being saved/edited elsewhere
+  // as its own state going stale. Auth via ?token= query param (see auth.ts)
+  // — native EventSource can't set headers.
+  authedRoute(
+    "GET",
+    "/tournaments/:id/saved-lines/events",
+    tournamentTeamId,
+    async (_req, { id }) => sseStream(savedLinesChannel(id!)),
   ),
 
   // ── Games ──────────────────────────────────────────────────────────────────

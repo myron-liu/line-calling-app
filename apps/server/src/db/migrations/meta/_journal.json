@@ -57,6 +57,20 @@
       "when": 1784529998067,
       "tag": "0007_public_swordsman",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1784532352644,
+      "tag": "0008_spooky_juggernaut",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1784532455100,
+      "tag": "0009_absurd_mastermind",
+      "breakpoints": true
     }
   ]
 }

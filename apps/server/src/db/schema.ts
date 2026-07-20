@@ -106,9 +106,12 @@ export const tournamentRoster = pgTable(
 
 export const savedLines = pgTable("saved_lines", {
   id: id(),
-  teamId: text("team_id")
+  // A team's lines/pods are scoped per-tournament (§4.3) — a team often
+  // reuses the same roster across several tournaments with different needs
+  // each time, so there's no team-wide pool anymore.
+  tournamentId: text("tournament_id")
     .notNull()
-    .references(() => teams.id, { onDelete: "cascade" }),
+    .references(() => tournaments.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   playerIds: jsonb("player_ids").notNull().$type<string[]>(),
   useCount: integer("use_count").notNull().default(0),

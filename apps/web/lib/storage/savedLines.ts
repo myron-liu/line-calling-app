@@ -1,7 +1,7 @@
-// Saved lines / pods (§4.3), team-scoped, persisted via the API server. A saved
-// line is a reusable group of 1..7 players (a full line or a partial pod);
-// applying one just pre-selects those players in the line builder — validation
-// still decides confirm.
+// Saved lines / pods (§4.3), tournament-scoped, persisted via the API server.
+// A saved line is a reusable group of 1..7 players (a full line or a partial
+// pod); applying one just pre-selects those players in the line builder —
+// validation still decides confirm.
 //
 // Setup screens (lines-editor) are online-only like the rest of §13.12. But the
 // live caller's quick-lines bar reads this list too, so `listSavedLines` keeps a
@@ -13,23 +13,23 @@ import { api } from "../api/client";
 import { keys } from "./keys";
 import { read, write } from "./store";
 
-export async function readSavedLines(teamId: string): Promise<SavedLine[]> {
+export async function readSavedLines(tournamentId: string): Promise<SavedLine[]> {
   try {
-    const lines = await api.get<SavedLine[]>(`/teams/${teamId}/saved-lines`);
-    write(keys.savedLines(teamId), lines);
+    const lines = await api.get<SavedLine[]>(`/tournaments/${tournamentId}/saved-lines`);
+    write(keys.savedLines(tournamentId), lines);
     return lines;
   } catch {
-    return read<SavedLine[]>(keys.savedLines(teamId), []);
+    return read<SavedLine[]>(keys.savedLines(tournamentId), []);
   }
 }
 
 export function createSavedLine(
-  teamId: string,
+  tournamentId: string,
   name: string,
   playerIds: string[],
   options?: { color?: LineColor | null; side?: ODPreference | null },
 ): Promise<SavedLine> {
-  return api.post<SavedLine>(`/teams/${teamId}/saved-lines`, {
+  return api.post<SavedLine>(`/tournaments/${tournamentId}/saved-lines`, {
     name,
     playerIds,
     ...options,

@@ -62,8 +62,11 @@ import {
   undoFlip as undoFlipApi,
 } from "@/lib/storage/games";
 
-/** Saved lines are team-scoped (§4.3). */
-const savedLinesScope = (game: Game): string => game.teamId;
+/** Saved lines are tournament-scoped (§4.3). Every game reachable from the
+ *  UI is created from within a tournament, so this is only undefined for a
+ *  legacy/hypothetical standalone game — which just gets an empty
+ *  quick-lines pool rather than crashing. */
+const savedLinesScope = (game: Game): string | undefined => game.tournamentId;
 
 /** Opens an EventSource authenticated via a `?token=` query param — native
  *  EventSource can't set an Authorization header, so the server accepts a
@@ -258,7 +261,8 @@ export function useLiveGame(gameId: string): LiveGameResult {
       versionRef.current = g.version;
       setGame(g);
       setRoster(readRosterSnapshot(gameId));
-      readSavedLines(savedLinesScope(g)).then(setSavedLines);
+      const scope = savedLinesScope(g);
+      if (scope) readSavedLines(scope).then(setSavedLines);
       setLog({
         points: readLog(gameId),
         meta: readMeta(gameId) ?? defaultMeta(g),
@@ -272,7 +276,8 @@ export function useLiveGame(gameId: string): LiveGameResult {
         if (cancelled) return;
         adoptServerState(full, false);
         registerGame(gameId);
-        readSavedLines(savedLinesScope(full.game)).then(setSavedLines);
+        const scope = savedLinesScope(full.game);
+        if (scope) readSavedLines(scope).then(setSavedLines);
       })
       .catch(() => {
         if (!cancelled) setNotFound(true);
@@ -383,20 +388,24 @@ export function useLiveGame(gameId: string): LiveGameResult {
 
   // Saved-lines updates (see apps/server/src/sse.ts's savedLinesChannel):
   // deliberately independent of the game-sync machinery above. Pods are a
-  // team-scoped, reusable resource — creating/editing/using/deleting one on
-  // another device should just refresh this device's saved-lines list, never
-  // touch `game`/`log`/syncState or run through adoptServerState. This is
-  // also what lets *this* device's own saveLine/recordLineUsage calls (which
-  // don't go through commit()/the outbox at all) stay fully decoupled from
-  // the game's own version/conflict handling.
-  const teamId = game?.teamId;
+  // tournament-scoped, reusable resource — creating/editing/using/deleting
+  // one on another device should just refresh this device's saved-lines
+  // list, never touch `game`/`log`/syncState or run through
+  // adoptServerState. This is also what lets *this* device's own
+  // saveLine/recordLineUsage calls (which don't go through commit()/the
+  // outbox at all) stay fully decoupled from the game's own version/conflict
+  // handling.
+  const tournamentId = game?.tournamentId;
   useEffect(() => {
-    if (!teamId) return;
-    return openAuthedEventSource(`/teams/${teamId}/saved-lines/events`, (ev) => {
-      if (!ev.data) return;
-      readSavedLines(teamId).then(setSavedLines);
-    });
-  }, [teamId]);
+    if (!tournamentId) return;
+    return openAuthedEventSource(
+      `/tournaments/${tournamentId}/saved-lines/events`,
+      (ev) => {
+        if (!ev.data) return;
+        readSavedLines(tournamentId).then(setSavedLines);
+      },
+    );
+  }, [tournamentId]);
 
   // Best-effort background sync, once on load: pick up roster changes made
   // server-side (e.g. a tournament check-in edit) since this game was created,
@@ -548,8 +557,8 @@ export function useLiveGame(gameId: string): LiveGameResult {
       // just falls back to its last-known-good cache (see savedLines.ts).
       saveLine: (name: string, playerIds: string[]) =>
         run(() => {
-          if (!game) return;
-          const scope = savedLinesScope(game);
+          const scope = game && savedLinesScope(game);
+          if (!scope) return;
           createSavedLine(scope, name, playerIds)
             .catch(() => {})
             .then(() => readSavedLines(scope))
@@ -557,8 +566,8 @@ export function useLiveGame(gameId: string): LiveGameResult {
         }),
       recordLineUsage: (id: string) =>
         run(() => {
-          if (!game) return;
-          const scope = savedLinesScope(game);
+          const scope = game && savedLinesScope(game);
+          if (!scope) return;
           incrementLineUsage(id)
             .catch(() => {})
             .then(() => readSavedLines(scope))

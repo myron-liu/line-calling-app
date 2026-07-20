@@ -37,8 +37,8 @@ export const keys = {
   /** ISO timestamp of the last successful sync to the server, for the "Last
    *  synced" indicator and the manual resync button. */
   gameLastSync: (gameId: string) => `${prefix}:game:${gameId}:last-sync`,
-  /** Reusable saved lines / pods, scoped to a team (§4.3). */
-  savedLines: (teamId: string) => `${prefix}:team:${teamId}:saved-lines`,
+  /** Reusable saved lines / pods, scoped to a tournament (§4.3). */
+  savedLines: (tournamentId: string) => `${prefix}:tournament:${tournamentId}:saved-lines`,
   /** Pending mutations awaiting sync to the Bun server. */
   outbox: `${prefix}:outbox`,
 } as const;

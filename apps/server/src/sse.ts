@@ -7,13 +7,14 @@
 //  - a game's own id (GET /games/:id/events) — pushed when that game's
 //    version changes, so a stale device learns about a conflicting write
 //    immediately instead of only on its own next (rejected) sync attempt.
-//  - savedLinesChannel(teamId) (GET /teams/:id/saved-lines/events) — pushed
-//    whenever a saved line/pod is created/edited/used/deleted for that team.
-//    This is deliberately unrelated to any game's version/conflict state:
-//    saved lines are reusable pods, not part of a game's own transition
-//    history, so a coach editing them on one device should just make every
-//    other open device's saved-lines list refresh — never trigger a game
-//    "stale, replaced with server data" notice (see useLiveGame.ts).
+//  - savedLinesChannel(tournamentId) (GET /tournaments/:id/saved-lines/events)
+//    — pushed whenever a saved line/pod is created/edited/used/deleted for
+//    that tournament. This is deliberately unrelated to any game's own
+//    version/conflict state: saved lines are reusable pods, not part of a
+//    game's own transition history, so a coach editing them on one device
+//    should just make every other open device's saved-lines list refresh —
+//    never trigger a game's "stale, replaced with server data" notice (see
+//    useLiveGame.ts).
 
 export type GameEvent =
   | { type: "updated"; version: number }
@@ -21,8 +22,8 @@ export type GameEvent =
 
 export type LinesEvent = { type: "updated" };
 
-export function savedLinesChannel(teamId: string): string {
-  return `lines:${teamId}`;
+export function savedLinesChannel(tournamentId: string): string {
+  return `lines:${tournamentId}`;
 }
 
 const subscribers = new Map<string, Set<ReadableStreamDefaultController>>();

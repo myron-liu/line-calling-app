@@ -27,9 +27,9 @@ import {
 } from "@/lib/player-display";
 import { Modal } from "@/components/modal";
 
-// Build/edit reusable lines (7) and pods (1-6) for a team, reached from the
-// tournament page. Saved lines are team-scoped (§4.3) so they show up in the
-// live caller's quick-lines bar across every game for this team.
+// Build/edit reusable lines (7) and pods (1-6), reached from the tournament
+// page. Saved lines are tournament-scoped (§4.3) so they show up in the live
+// caller's quick-lines bar only for games under this specific tournament.
 export function LinesEditor({ tournamentId }: { tournamentId: string }) {
   const [tournament, setTournament] = useState<Tournament | null | undefined>(
     undefined,
@@ -49,7 +49,7 @@ export function LinesEditor({ tournamentId }: { tournamentId: string }) {
       setTournament(t);
       if (!t) return;
       readPlayers(t.teamId).then(setPlayers);
-      readSavedLines(t.teamId).then(setLines);
+      readSavedLines(tournamentId).then(setLines);
     });
   }, [tournamentId]);
 
@@ -79,8 +79,7 @@ export function LinesEditor({ tournamentId }: { tournamentId: string }) {
     );
   }
 
-  const teamId = tournament.teamId;
-  const refresh = () => readSavedLines(teamId).then(setLines);
+  const refresh = () => readSavedLines(tournamentId).then(setLines);
 
   const composition = (playerIds: string[]) => {
     let mmp = 0;
@@ -129,7 +128,7 @@ export function LinesEditor({ tournamentId }: { tournamentId: string }) {
         side,
       });
     } else {
-      await createSavedLine(teamId, name.trim(), selected, { color, side });
+      await createSavedLine(tournamentId, name.trim(), selected, { color, side });
     }
     refresh();
     resetBuilder();

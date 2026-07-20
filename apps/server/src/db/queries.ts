@@ -245,12 +245,13 @@ export async function updatePlayer(
 }
 
 /**
- * Deleting a player also strips them from every saved line/pod on the team —
- * otherwise the pod silently keeps an unreplaceable, invisible slot for a
- * player who no longer exists. A pod that ends up with no players left is
- * removed rather than kept around empty. This is distinct from tournament
- * check-in: being marked absent/injured there never touches saved lines,
- * since that's a per-tournament availability flag, not a roster removal.
+ * Deleting a player also strips them from every saved line/pod across every
+ * one of the team's tournaments — otherwise a pod silently keeps an
+ * unreplaceable, invisible slot for a player who no longer exists. A pod that
+ * ends up with no players left is removed rather than kept around empty.
+ * This is distinct from tournament check-in: being marked absent/injured
+ * there never touches saved lines, since that's a per-tournament
+ * availability flag, not a roster removal.
  */
 export async function deletePlayer(id: string): Promise<void> {
   const [player] = await db.select().from(players).where(eq(players.id, id));
@@ -258,10 +259,11 @@ export async function deletePlayer(id: string): Promise<void> {
   if (!player) return;
 
   const teamLines = await db
-    .select()
+    .select({ line: savedLines })
     .from(savedLines)
-    .where(eq(savedLines.teamId, player.teamId));
-  for (const line of teamLines) {
+    .innerJoin(tournaments, eq(savedLines.tournamentId, tournaments.id))
+    .where(eq(tournaments.teamId, player.teamId));
+  for (const { line } of teamLines) {
     if (!line.playerIds.includes(id)) continue;
     const nextPlayerIds = line.playerIds.filter((pid) => pid !== id);
     if (nextPlayerIds.length === 0) {
@@ -477,19 +479,22 @@ export async function syncTournamentGameRosters(
 
 // ── Saved lines / pods ───────────────────────────────────────────────────────
 
-export async function listSavedLines(teamId: string): Promise<SavedLine[]> {
+export async function listSavedLines(tournamentId: string): Promise<SavedLine[]> {
   const rows = await db
     .select()
     .from(savedLines)
-    .where(eq(savedLines.teamId, teamId));
+    .where(eq(savedLines.tournamentId, tournamentId));
   return rows.map(toSavedLine);
 }
 
-/** Single-column lookup for authorization (see routes.ts's authedRoute). */
+/** Single-column lookup for authorization (see routes.ts's authedRoute) — a
+ *  saved line has no team_id of its own anymore, so this joins through its
+ *  tournament. */
 export async function getSavedLineTeamId(id: string): Promise<string | null> {
   const [row] = await db
-    .select({ teamId: savedLines.teamId })
+    .select({ teamId: tournaments.teamId })
     .from(savedLines)
+    .innerJoin(tournaments, eq(savedLines.tournamentId, tournaments.id))
     .where(eq(savedLines.id, id));
   return row?.teamId ?? null;
 }
@@ -514,7 +519,7 @@ function samePersonnel(a: string[], b: string[]): boolean {
  */
 export async function createSavedLine(input: {
   id: string;
-  teamId: string;
+  tournamentId: string;
   name: string;
   playerIds: string[];
   color?: LineColor | null;
@@ -523,7 +528,7 @@ export async function createSavedLine(input: {
   const existing = await db
     .select()
     .from(savedLines)
-    .where(eq(savedLines.teamId, input.teamId));
+    .where(eq(savedLines.tournamentId, input.tournamentId));
   const match = existing.find(
     (l) => normalizeLineName(l.name) === normalizeLineName(input.name),
   );
@@ -544,7 +549,7 @@ export async function createSavedLine(input: {
     .insert(savedLines)
     .values({
       id: input.id,
-      teamId: input.teamId,
+      tournamentId: input.tournamentId,
       name: input.name,
       playerIds: input.playerIds,
       color: input.color,
@@ -577,11 +582,11 @@ export async function updateSavedLine(
 
   if (patch.name !== undefined) {
     const nextPlayerIds = patch.playerIds ?? existing.playerIds;
-    const teamLines = await db
+    const tournamentLines = await db
       .select()
       .from(savedLines)
-      .where(eq(savedLines.teamId, existing.teamId));
-    const collision = teamLines.find(
+      .where(eq(savedLines.tournamentId, existing.tournamentId));
+    const collision = tournamentLines.find(
       (l) => l.id !== id && normalizeLineName(l.name) === normalizeLineName(patch.name!),
     );
     if (collision) {
@@ -617,20 +622,20 @@ export async function incrementSavedLineUsage(
   return row ? toSavedLine(row) : null;
 }
 
-/** Returns the deleted line's teamId (for the caller to broadcast on), or
- *  null if it didn't exist. */
+/** Returns the deleted line's tournamentId (for the caller to broadcast on),
+ *  or null if it didn't exist. */
 export async function deleteSavedLine(id: string): Promise<string | null> {
   const [row] = await db
     .delete(savedLines)
     .where(eq(savedLines.id, id))
-    .returning({ teamId: savedLines.teamId });
-  return row?.teamId ?? null;
+    .returning({ tournamentId: savedLines.tournamentId });
+  return row?.tournamentId ?? null;
 }
 
 function toSavedLine(row: typeof savedLines.$inferSelect): SavedLine {
   return {
     id: row.id,
-    teamId: row.teamId,
+    tournamentId: row.tournamentId,
     name: row.name,
     playerIds: row.playerIds,
     useCount: row.useCount,

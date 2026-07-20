@@ -99,9 +99,12 @@ export interface TournamentRoster {
 /** Coach-assigned color for a saved line/pod chip in the quick-lines bar. */
 export type LineColor = "red" | "green" | "blue" | "yellow" | "black" | "purple";
 
+/** A tournament-scoped reusable line/pod (§4.3) — each tournament has its
+ *  own independent pool, since a team often reuses the same roster across
+ *  several tournaments with different needs each time. */
 export interface SavedLine {
   id: string;
-  teamId: string;
+  tournamentId: string;
   name: string;
   /** 1..7 players (a full line or a partial pod). */
   playerIds: string[];
