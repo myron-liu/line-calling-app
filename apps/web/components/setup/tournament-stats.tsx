@@ -111,21 +111,25 @@ export function TournamentStats({ tournamentId }: { tournamentId: string }) {
         {stats.players.length === 0 ? (
           <p className="text-sm text-muted">No completed points yet.</p>
         ) : isMixed ? (
-          <div className="grid grid-cols-2 gap-3">
-            <PlayerStatsTable
-              label="MMP"
-              tone="sky"
-              players={stats.players.filter((p) => p.genderMatch === "MMP")}
-              sort={sort}
-              onSort={onSort}
-            />
-            <PlayerStatsTable
-              label="WMP"
-              tone="rose"
-              players={stats.players.filter((p) => p.genderMatch === "WMP")}
-              sort={sort}
-              onSort={onSort}
-            />
+          <div className="flex flex-wrap gap-3">
+            <div className="min-w-[280px] flex-1">
+              <PlayerStatsTable
+                label="MMP"
+                tone="sky"
+                players={stats.players.filter((p) => p.genderMatch === "MMP")}
+                sort={sort}
+                onSort={onSort}
+              />
+            </div>
+            <div className="min-w-[280px] flex-1">
+              <PlayerStatsTable
+                label="WMP"
+                tone="rose"
+                players={stats.players.filter((p) => p.genderMatch === "WMP")}
+                sort={sort}
+                onSort={onSort}
+              />
+            </div>
           </div>
         ) : (
           <PlayerStatsTable
@@ -173,11 +177,11 @@ function SortableTh({
   const active = sort.key === sortKey;
   return (
     <th
-      className={`border-b border-line pb-1 ${align === "right" ? "text-right" : "text-left"} text-xs font-semibold uppercase tracking-wide ${toneClassName ?? "text-faint"}`}
+      className={`whitespace-nowrap border-b border-line pb-1 ${align === "right" ? "text-right" : "text-left"} text-xs font-semibold uppercase tracking-wide ${toneClassName ?? "text-faint"}`}
     >
       <button
         onClick={() => onSort(sortKey)}
-        className={`inline-flex items-center gap-0.5 hover:text-fg ${
+        className={`inline-flex items-center gap-0.5 whitespace-nowrap hover:text-fg ${
           align === "right" ? "flex-row-reverse" : ""
         } ${active ? "text-fg" : ""}`}
       >

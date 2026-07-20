@@ -440,23 +440,27 @@ function PointsPlayedTables({
   const [sort, setSort] = useState<StatSort>({ key: "count", dir: "desc" });
   const onSort = (key: StatSortKey) => setSort((cur) => toggleStatSort(cur, key));
   return (
-    <div className="grid grid-cols-2 gap-3">
-      <PointsPlayedTable
-        gender="MMP"
-        roster={roster}
-        pointsPlayed={pointsPlayed}
-        playerOutcomes={playerOutcomes}
-        sort={sort}
-        onSort={onSort}
-      />
-      <PointsPlayedTable
-        gender="WMP"
-        roster={roster}
-        pointsPlayed={pointsPlayed}
-        playerOutcomes={playerOutcomes}
-        sort={sort}
-        onSort={onSort}
-      />
+    <div className="flex flex-wrap gap-3">
+      <div className="min-w-[280px] flex-1">
+        <PointsPlayedTable
+          gender="MMP"
+          roster={roster}
+          pointsPlayed={pointsPlayed}
+          playerOutcomes={playerOutcomes}
+          sort={sort}
+          onSort={onSort}
+        />
+      </div>
+      <div className="min-w-[280px] flex-1">
+        <PointsPlayedTable
+          gender="WMP"
+          roster={roster}
+          pointsPlayed={pointsPlayed}
+          playerOutcomes={playerOutcomes}
+          sort={sort}
+          onSort={onSort}
+        />
+      </div>
     </div>
   );
 }
@@ -485,11 +489,11 @@ function SortableTh({
   const active = sort.key === sortKey;
   return (
     <th
-      className={`border-b border-line pb-1 ${align === "right" ? "text-right" : "text-left"} text-xs font-semibold uppercase tracking-wide ${toneClassName ?? "text-faint"}`}
+      className={`whitespace-nowrap border-b border-line pb-1 ${align === "right" ? "text-right" : "text-left"} text-xs font-semibold uppercase tracking-wide ${toneClassName ?? "text-faint"}`}
     >
       <button
         onClick={() => onSort(sortKey)}
-        className={`inline-flex items-center gap-0.5 hover:text-fg ${
+        className={`inline-flex items-center gap-0.5 whitespace-nowrap hover:text-fg ${
           align === "right" ? "flex-row-reverse" : ""
         } ${active ? "text-fg" : ""}`}
       >
