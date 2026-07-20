@@ -134,6 +134,7 @@ function Managers({
   const [digits, setDigits] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [removing, setRemoving] = useState<TeamManager | null>(null);
 
   const add = async () => {
     if (digits.length !== 10) return;
@@ -150,14 +151,17 @@ function Managers({
     }
   };
 
-  const remove = async (managerPhone: string) => {
-    setError(null);
-    try {
-      await removeTeamManager(teamId, managerPhone);
-      await onChange();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
+  const confirmRemove = () => {
+    if (!removing) return;
+    removeTeamManager(teamId, removing.phone)
+      .then(() => {
+        setRemoving(null);
+        onChange();
+      })
+      .catch((err) => {
+        setRemoving(null);
+        setError(err instanceof Error ? err.message : String(err));
+      });
   };
 
   return (
@@ -176,7 +180,7 @@ function Managers({
               )}
             </span>
             <button
-              onClick={() => remove(m.phone)}
+              onClick={() => setRemoving(m)}
               disabled={managers.length <= 1}
               title={managers.length <= 1 ? "A team needs at least one manager" : "Remove"}
               className="text-xs font-medium text-red-600 hover:opacity-80 disabled:opacity-30 dark:text-red-400"
@@ -199,6 +203,32 @@ function Managers({
         </button>
       </div>
       {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
+
+      {removing && (
+        <Modal onClose={() => setRemoving(null)}>
+          <h2 className="font-medium">Remove manager?</h2>
+          <p className="text-sm text-muted">
+            Remove {removing.firstName && removing.lastName
+              ? `${removing.firstName} ${removing.lastName} (${removing.phone})`
+              : removing.phone}{" "}
+            as a manager of this team? They&apos;ll lose access immediately.
+          </p>
+          <div className="flex justify-end gap-2 pt-1">
+            <button
+              onClick={() => setRemoving(null)}
+              className="rounded-md border border-line-strong px-3 py-1.5 text-sm"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={confirmRemove}
+              className="rounded bg-red-600 px-3 py-1.5 text-sm font-medium text-white"
+            >
+              Remove
+            </button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
