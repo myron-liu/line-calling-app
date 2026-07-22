@@ -272,12 +272,12 @@ describe("suggestedSituationTag (quick-lines default tag filter)", () => {
   });
 
   test("behind by 4+ is not Developmental (must be ahead, not just a big margin)", () => {
-    expect(suggestedSituationTag(15, 6, 10, false, [])).toBeNull();
+    expect(suggestedSituationTag(15, 6, 10, false, [])).toBe("Standard");
   });
 
-  test("no signal at all -> null", () => {
+  test("no sharper trigger, not tight -> Standard (the blanket default)", () => {
     // margin 3: not tight (<=2), not ahead by 4+, no half/universe/broken trigger.
-    expect(suggestedSituationTag(15, 6, 3, false, [])).toBeNull();
+    expect(suggestedSituationTag(15, 6, 3, false, [])).toBe("Standard");
   });
 
   test("this point could reach halfScore -> Kill", () => {

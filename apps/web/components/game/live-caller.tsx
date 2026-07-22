@@ -291,7 +291,6 @@ function LineBuilder({
       state.halftimeReached,
       points,
     );
-    if (!suggestion) return "all";
     return savedLines.some((l) => l.tags?.includes(suggestion)) ? suggestion : "all";
   });
   // Prune anyone who becomes ineligible (e.g. marked injured mid-build) without

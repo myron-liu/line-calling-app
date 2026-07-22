@@ -166,44 +166,50 @@ function Managers({
   };
 
   return (
-    <div className="space-y-2">
-      <h2 className="font-medium">Managers ({managers.length})</h2>
-      <ul className="space-y-1">
-        {managers.map((m) => (
-          <li
-            key={m.phone}
-            className="flex items-center justify-between rounded-md border border-line px-3 py-1.5 text-sm"
-          >
-            <span>
-              {m.phone}
-              {m.firstName && m.lastName && (
-                <span className="text-muted"> ({m.firstName} {m.lastName})</span>
-              )}
-            </span>
+    <>
+      <details className="rounded-lg border border-line p-2">
+        <summary className="cursor-pointer text-sm font-medium">
+          Managers <span className="font-normal text-faint">({managers.length})</span>
+        </summary>
+        <div className="mt-2 space-y-2">
+          <ul className="space-y-1">
+            {managers.map((m) => (
+              <li
+                key={m.phone}
+                className="flex items-center justify-between rounded-md border border-line px-3 py-1.5 text-sm"
+              >
+                <span>
+                  {m.phone}
+                  {m.firstName && m.lastName && (
+                    <span className="text-muted"> ({m.firstName} {m.lastName})</span>
+                  )}
+                </span>
+                <button
+                  onClick={() => setRemoving(m)}
+                  disabled={managers.length <= 1}
+                  title={managers.length <= 1 ? "A team needs at least one manager" : "Remove"}
+                  className="text-xs font-medium text-red-600 hover:opacity-80 disabled:opacity-30 dark:text-red-400"
+                >
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+          <div className="flex gap-2">
+            <div className="flex-1">
+              <UsPhoneInput digits={digits} onDigitsChange={setDigits} onEnter={add} />
+            </div>
             <button
-              onClick={() => setRemoving(m)}
-              disabled={managers.length <= 1}
-              title={managers.length <= 1 ? "A team needs at least one manager" : "Remove"}
-              className="text-xs font-medium text-red-600 hover:opacity-80 disabled:opacity-30 dark:text-red-400"
+              onClick={add}
+              disabled={busy || digits.length !== 10}
+              className="rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white disabled:bg-disabled"
             >
-              Remove
+              Add manager
             </button>
-          </li>
-        ))}
-      </ul>
-      <div className="flex gap-2">
-        <div className="flex-1">
-          <UsPhoneInput digits={digits} onDigitsChange={setDigits} onEnter={add} />
+          </div>
+          {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
         </div>
-        <button
-          onClick={add}
-          disabled={busy || digits.length !== 10}
-          className="rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white disabled:bg-disabled"
-        >
-          Add manager
-        </button>
-      </div>
-      {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
+      </details>
 
       {removing && (
         <Modal onClose={() => setRemoving(null)}>
@@ -230,7 +236,7 @@ function Managers({
           </div>
         </Modal>
       )}
-    </div>
+    </>
   );
 }
 
@@ -247,12 +253,7 @@ function Roster({
   players: Player[];
   onChange: () => void;
 }) {
-  const [name, setName] = useState("");
-  const [nickname, setNickname] = useState("");
-  const [genderMatch, setGenderMatch] = useState<GenderMatch>("MMP");
-  const [role, setRole] = useState<Role>("cutter");
-  const [odPreference, setOdPreference] = useState<ODPreference>("both");
-  const [jersey, setJersey] = useState("");
+  const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<Player | null>(null);
   const [deleting, setDeleting] = useState<Player | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -283,41 +284,19 @@ function Roster({
   const mmpPlayers = sortRoster(filtered.filter((p) => p.genderMatch === "MMP"));
   const wmpPlayers = sortRoster(filtered.filter((p) => p.genderMatch === "WMP"));
 
-  const conflict = name.trim() ? playerConflict(players, { name, nickname }) : null;
-
-  // Single-division teams don't need a gender-match choice at all — every
-  // player on an Open roster is MMP, every player on a Women's roster is
-  // WMP, by definition. Only Mixed (which needs both to fill the ratio)
-  // shows the picker.
-  const fixedGenderMatch: GenderMatch | null =
-    division === "open" ? "MMP" : division === "women" ? "WMP" : null;
-
-  const add = async () => {
-    if (!name.trim() || conflict) return;
-    try {
-      await createPlayer(teamId, {
-        name: name.trim(),
-        nickname: nickname.trim() || undefined,
-        genderMatch: fixedGenderMatch ?? genderMatch,
-        role,
-        odPreference,
-        jerseyNumber: jersey ? Number(jersey) : undefined,
-      });
-      setName("");
-      setNickname("");
-      setJersey("");
-      setError(null);
-      onChange();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  };
-
   return (
     <div className="space-y-3">
-      <h2 className="font-medium">
-        Roster <span className="text-faint">({players.length})</span>
-      </h2>
+      <div className="flex items-center justify-between">
+        <h2 className="font-medium">
+          Roster <span className="text-faint">({players.length})</span>
+        </h2>
+        <button
+          onClick={() => setAdding(true)}
+          className="rounded bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white"
+        >
+          Add player
+        </button>
+      </div>
 
       {players.length === 0 ? (
         <div className="space-y-1 text-sm text-muted">
@@ -390,68 +369,20 @@ function Roster({
         </>
       )}
 
-      <div className="flex flex-wrap items-end gap-2 rounded-lg border border-dashed border-line-strong p-3 text-sm">
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Player name"
-          className="h-9 min-w-[8rem] flex-1 rounded border border-line-strong px-2"
+      {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
+
+      {adding && (
+        <AddPlayerModal
+          teamId={teamId}
+          players={players}
+          division={division}
+          onClose={() => setAdding(false)}
+          onAdded={() => {
+            setAdding(false);
+            onChange();
+          }}
         />
-        <input
-          value={nickname}
-          onChange={(e) => setNickname(e.target.value)}
-          placeholder="Nickname"
-          className="h-9 min-w-[7rem] flex-1 rounded border border-line-strong px-2"
-        />
-        {!fixedGenderMatch && (
-          <select
-            value={genderMatch}
-            onChange={(e) => setGenderMatch(e.target.value as GenderMatch)}
-            className="h-9 rounded border border-line-strong px-2"
-          >
-            <option value="MMP">MMP</option>
-            <option value="WMP">WMP</option>
-          </select>
-        )}
-        <select
-          value={role}
-          onChange={(e) => setRole(e.target.value as Role)}
-          className="h-9 rounded border border-line-strong px-2"
-        >
-          <option value="handler">Handler</option>
-          <option value="cutter">Cutter</option>
-          <option value="both">Both</option>
-        </select>
-        <select
-          value={odPreference}
-          onChange={(e) => setOdPreference(e.target.value as ODPreference)}
-          className="h-9 rounded border border-line-strong px-2"
-        >
-          <option value="O">O</option>
-          <option value="D">D</option>
-          <option value="both">O/D</option>
-        </select>
-        <input
-          value={jersey}
-          onChange={(e) => setJersey(e.target.value.replace(/\D/g, ""))}
-          placeholder="#"
-          inputMode="numeric"
-          className="h-9 w-14 rounded border border-line-strong px-2"
-        />
-        <button
-          onClick={add}
-          disabled={!name.trim() || !!conflict}
-          className="h-9 rounded bg-emerald-600 px-3 font-medium text-white disabled:bg-disabled"
-        >
-          Add
-        </button>
-        {conflict && (
-          <p className="w-full text-xs text-red-600 dark:text-red-400">{conflict}</p>
-        )}
-        {!conflict && error && (
-          <p className="w-full text-xs text-red-600 dark:text-red-400">{error}</p>
-        )}
-      </div>
+      )}
 
       {editing && (
         <EditPlayerModal
@@ -619,14 +550,14 @@ function RosterRow({
         onClick={() => onEdit(p)}
         aria-label={`Edit ${p.name}`}
         title="Edit player"
-        className="shrink-0 text-faint hover:text-fg"
+        className="shrink-0 p-1.5 text-faint hover:text-fg"
       >
         <EditIcon />
       </button>
       <button
         onClick={() => onDelete(p)}
         aria-label={`Remove ${p.name}`}
-        className="shrink-0 text-faint hover:text-red-600 dark:text-red-400"
+        className="ml-1 shrink-0 p-1.5 text-faint hover:text-red-600 dark:text-red-400"
       >
         ×
       </button>
@@ -651,6 +582,147 @@ function EditIcon() {
         strokeLinejoin="round"
       />
     </svg>
+  );
+}
+
+// ── Add player modal ─────────────────────────────────────────────────────────────
+
+function AddPlayerModal({
+  teamId,
+  players,
+  division,
+  onClose,
+  onAdded,
+}: {
+  teamId: string;
+  players: Player[];
+  division: Division;
+  onClose: () => void;
+  onAdded: () => void;
+}) {
+  const [name, setName] = useState("");
+  const [nickname, setNickname] = useState("");
+  const [genderMatch, setGenderMatch] = useState<GenderMatch>("MMP");
+  const [role, setRole] = useState<Role>("cutter");
+  const [odPreference, setOdPreference] = useState<ODPreference>("both");
+  const [jersey, setJersey] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  // Same single-division rule as the edit-player modal: Open/Women teams
+  // don't get a gender-match choice at all.
+  const fixedGenderMatch: GenderMatch | null =
+    division === "open" ? "MMP" : division === "women" ? "WMP" : null;
+
+  const conflict = name.trim() ? playerConflict(players, { name, nickname }) : "Name is required.";
+
+  const add = async () => {
+    if (conflict) return;
+    try {
+      await createPlayer(teamId, {
+        name: name.trim(),
+        nickname: nickname.trim() || undefined,
+        genderMatch: fixedGenderMatch ?? genderMatch,
+        role,
+        odPreference,
+        jerseyNumber: jersey ? Number(jersey) : undefined,
+      });
+      onAdded();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  return (
+    <Modal onClose={onClose}>
+      <h2 className="font-medium">Add player</h2>
+      <div className="space-y-2 text-sm">
+        <label className="flex flex-col gap-1">
+          <span className="text-muted">Name</span>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="h-9 rounded border border-line-strong px-2"
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-muted">Nickname</span>
+          <input
+            value={nickname}
+            onChange={(e) => setNickname(e.target.value)}
+            className="h-9 rounded border border-line-strong px-2"
+          />
+        </label>
+        {!fixedGenderMatch && (
+          <label className="flex flex-col gap-1">
+            <span className="text-muted">Gender match</span>
+            <select
+              value={genderMatch}
+              onChange={(e) => setGenderMatch(e.target.value as GenderMatch)}
+              className="h-9 rounded border border-line-strong px-2"
+            >
+              <option value="MMP">MMP</option>
+              <option value="WMP">WMP</option>
+            </select>
+          </label>
+        )}
+        <label className="flex flex-col gap-1">
+          <span className="text-muted">Role</span>
+          <select
+            value={role}
+            onChange={(e) => setRole(e.target.value as Role)}
+            className="h-9 rounded border border-line-strong px-2"
+          >
+            <option value="handler">Handler</option>
+            <option value="cutter">Cutter</option>
+            <option value="both">Both</option>
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-muted">O/D preference</span>
+          <select
+            value={odPreference}
+            onChange={(e) => setOdPreference(e.target.value as ODPreference)}
+            className="h-9 rounded border border-line-strong px-2"
+          >
+            <option value="O">O</option>
+            <option value="D">D</option>
+            <option value="both">O/D</option>
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-muted">Jersey #</span>
+          <input
+            value={jersey}
+            onChange={(e) => setJersey(e.target.value.replace(/\D/g, ""))}
+            inputMode="numeric"
+            className="h-9 w-20 rounded border border-line-strong px-2"
+          />
+        </label>
+      </div>
+
+      {conflict && name.trim() && (
+        <p className="text-xs text-red-600 dark:text-red-400">{conflict}</p>
+      )}
+      {!conflict && error && (
+        <p className="text-xs text-red-600 dark:text-red-400">{error}</p>
+      )}
+
+      <div className="flex justify-end gap-2 pt-1">
+        <button
+          onClick={onClose}
+          className="rounded-md border border-line-strong px-3 py-1.5 text-sm"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={add}
+          disabled={!!conflict}
+          className="rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white disabled:bg-disabled"
+        >
+          Add
+        </button>
+      </div>
+    </Modal>
   );
 }
 
@@ -800,20 +872,28 @@ function Tournaments({
   tournaments: Tournament[];
   onCreate: (name: string, startDate: string, endDate?: string) => void;
 }) {
-  const [name, setName] = useState("");
-  const [startDate, setStartDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [endDate, setEndDate] = useState("");
+  const [adding, setAdding] = useState(false);
 
-  const endDateInvalid = endDate !== "" && endDate < startDate;
+  // Newest first — the tournaments a coach is about to manage or just
+  // finished are almost always more relevant than ones from long ago.
+  const sorted = [...tournaments].sort((a, b) => b.startDate.localeCompare(a.startDate));
 
   return (
     <div className="space-y-3">
-      <h2 className="font-medium">Tournaments</h2>
-      {tournaments.length === 0 ? (
+      <div className="flex items-center justify-between">
+        <h2 className="font-medium">Tournaments</h2>
+        <button
+          onClick={() => setAdding(true)}
+          className="rounded bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white"
+        >
+          Add tournament
+        </button>
+      </div>
+      {sorted.length === 0 ? (
         <p className="text-sm text-muted">No tournaments yet.</p>
       ) : (
         <ul className="space-y-2">
-          {tournaments.map((t) => (
+          {sorted.map((t) => (
             <li
               key={t.id}
               className="flex items-center justify-between gap-2 rounded-lg border border-line px-4 py-3"
@@ -836,49 +916,96 @@ function Tournaments({
           ))}
         </ul>
       )}
-      <div className="flex flex-wrap items-start gap-2 rounded-lg border border-dashed border-line-strong p-3 text-sm">
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder="Tournament name"
-          className="h-9 min-w-[8rem] flex-1 rounded border border-line-strong px-2"
-        />
-        <input
-          type="date"
-          value={startDate}
-          onChange={(e) => {
-            setStartDate(e.target.value);
-            if (endDate && endDate < e.target.value) setEndDate(e.target.value);
+
+      {adding && (
+        <AddTournamentModal
+          onClose={() => setAdding(false)}
+          onCreate={(name, startDate, endDate) => {
+            onCreate(name, startDate, endDate);
+            setAdding(false);
           }}
-          className="h-9 rounded border border-line-strong px-2"
         />
-        <input
-          type="date"
-          value={endDate}
-          min={startDate}
-          onChange={(e) => setEndDate(e.target.value)}
-          placeholder="End date"
-          className="h-9 rounded border border-line-strong px-2"
-        />
-        <button
-          onClick={() => {
-            if (!name.trim() || endDateInvalid) return;
-            onCreate(name.trim(), startDate, endDate || undefined);
-            setName("");
-            setEndDate("");
-          }}
-          disabled={!name.trim() || endDateInvalid}
-          className="h-9 rounded bg-emerald-600 px-3 font-medium text-white disabled:bg-disabled"
-        >
-          Create
-        </button>
+      )}
+    </div>
+  );
+}
+
+function AddTournamentModal({
+  onClose,
+  onCreate,
+}: {
+  onClose: () => void;
+  onCreate: (name: string, startDate: string, endDate?: string) => void;
+}) {
+  const [name, setName] = useState("");
+  const [startDate, setStartDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [endDate, setEndDate] = useState("");
+
+  const endDateInvalid = endDate !== "" && endDate < startDate;
+
+  const create = () => {
+    if (!name.trim() || endDateInvalid) return;
+    onCreate(name.trim(), startDate, endDate || undefined);
+  };
+
+  return (
+    <Modal onClose={onClose}>
+      <h2 className="font-medium">Add tournament</h2>
+      <div className="space-y-2 text-sm">
+        <label className="flex flex-col gap-1">
+          <span className="text-muted">Name</span>
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="h-9 rounded border border-line-strong px-2"
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-muted">Start date</span>
+          <input
+            type="date"
+            value={startDate}
+            onChange={(e) => {
+              setStartDate(e.target.value);
+              if (endDate && endDate < e.target.value) setEndDate(e.target.value);
+            }}
+            className="h-9 rounded border border-line-strong px-2"
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-muted">End date (optional)</span>
+          <input
+            type="date"
+            value={endDate}
+            min={startDate}
+            onChange={(e) => setEndDate(e.target.value)}
+            className="h-9 rounded border border-line-strong px-2"
+          />
+        </label>
       </div>
+
       {endDateInvalid && (
         <p className="text-xs text-red-600 dark:text-red-400">
           End date can&rsquo;t be before the start date.
         </p>
       )}
-    </div>
+
+      <div className="flex justify-end gap-2 pt-1">
+        <button
+          onClick={onClose}
+          className="rounded-md border border-line-strong px-3 py-1.5 text-sm"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={create}
+          disabled={!name.trim() || endDateInvalid}
+          className="rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white disabled:bg-disabled"
+        >
+          Create
+        </button>
+      </div>
+    </Modal>
   );
 }
 

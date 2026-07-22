@@ -190,21 +190,25 @@ export function halfScoreForCap(cap: GameCapMode): number | null {
  * Advisory default for which fixed SituationTag the live caller's quick-lines
  * tag filter should start on for the point about to be built — the coach can
  * always override it for that point (see live-caller.tsx, which recomputes
- * fresh each point rather than fighting a manual choice mid-point).
+ * fresh each point rather than fighting a manual choice mid-point). The
+ * caller is also responsible for a further fallback this function doesn't
+ * know about: if no saved line/pod actually carries the suggested tag, fall
+ * back to "All" instead (see live-caller.tsx's tagFilter initializer) — this
+ * function only ever reasons about game state, never about a team's tags.
  *
  * "Tight" (margin <= 2) and "comfortably ahead" (margin >= 4) are judgment
  * calls with no universal definition — easy to retune here if they don't
  * match how a coach actually plays.
  *
  * Priority (first match wins) favors your sharpest personnel whenever
- * something concerning is happening, over just riding a comfortable lead:
+ * something concerning is happening, over just riding a comfortable lead —
+ * Standard is the blanket default for everything else:
  *   1. Kill    — broken twice in a row; this point could end a half or the
  *                game (someone's one point from halfScore/gameCap, i.e.
  *                "Universe" or the point before it); or it's the first point
  *                back from halftime in a tight game.
  *   2. Developmental — ahead by 4+.
- *   3. Standard — tight, with no sharper Kill trigger above.
- *   4. null — no strong situational signal; leave the filter on "All".
+ *   3. Standard — everything else.
  */
 export function suggestedSituationTag(
   gameCap: GameCapMode,
@@ -212,7 +216,7 @@ export function suggestedSituationTag(
   theirScore: number,
   halftimeReached: boolean,
   points: Point[],
-): SituationTag | null {
+): SituationTag {
   const margin = Math.abs(ourScore - theirScore);
   const isTight = margin <= 2;
 
@@ -241,6 +245,5 @@ export function suggestedSituationTag(
     return "Kill";
   }
   if (ourScore - theirScore >= 4) return "Developmental";
-  if (isTight) return "Standard";
-  return null;
+  return "Standard";
 }
