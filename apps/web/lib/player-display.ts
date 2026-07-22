@@ -3,7 +3,13 @@
 // place so every roster listing in the app (team page, check-in, line builder,
 // lines/pods editor) sorts and renders players identically.
 
-import type { GenderMatch, LineColor, ODPreference, Role } from "@shared/game-rules";
+import type {
+  GenderMatch,
+  LineColor,
+  ODPreference,
+  Role,
+  SituationTag,
+} from "@shared/game-rules";
 
 /** Short role tag for the roster: H / C / H,C. */
 export function roleTag(role: Role): string {
@@ -98,4 +104,25 @@ export const LINE_COLOR_CHIP: Record<LineColor, string> = {
     "border-neutral-400 bg-neutral-100 text-neutral-800 dark:border-neutral-500/40 dark:bg-neutral-500/10 dark:text-neutral-300",
   purple:
     "border-purple-300 bg-purple-50 text-purple-800 dark:border-purple-500/40 dark:bg-purple-500/10 dark:text-purple-300",
+};
+
+/** Active-state color for an O/D toggle or filter chip — sky for Offense,
+ *  orange for Defense, matching the existing O/D accordion tones (see
+ *  ODAccordion in live-caller.tsx) so every O/D selector in the app reads the
+ *  same way. "Both"/"O-D"/"All" options intentionally have no entry here —
+ *  they're not a specific side, so they keep the default active style. */
+export const OD_TONE: Record<"O" | "D", string> = {
+  O: "border-sky-500 bg-sky-50 font-medium text-sky-800 dark:bg-sky-500/10 dark:text-sky-300",
+  D: "border-orange-500 bg-orange-50 font-medium text-orange-800 dark:bg-orange-500/10 dark:text-orange-300",
+};
+
+/** Active-state color for a situational-tag toggle/filter chip (see
+ *  SITUATION_TAGS) — Kill reads as urgent/defensive, Standard as the
+ *  default/neutral state, Developmental as a calmer, distinct color. */
+export const SITUATION_TAG_COLOR: Record<SituationTag, string> = {
+  Kill: "border-red-500 bg-red-50 font-medium text-red-800 dark:bg-red-500/10 dark:text-red-300",
+  Standard:
+    "border-emerald-500 bg-emerald-50 font-medium text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300",
+  Developmental:
+    "border-purple-500 bg-purple-50 font-medium text-purple-800 dark:bg-purple-500/10 dark:text-purple-300",
 };

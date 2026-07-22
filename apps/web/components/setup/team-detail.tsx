@@ -41,6 +41,7 @@ import { Modal } from "@/components/modal";
 import { UsPhoneInput } from "@/components/us-phone-input";
 import { usPhoneE164 } from "@/lib/phone";
 import {
+  OD_TONE,
   ROLE_BADGE_COLOR,
   displayName,
   odTag,
@@ -344,8 +345,18 @@ function Roster({
             />
             <span className="ml-2 text-faint">Line:</span>
             <FilterChip label="All" active={odFilter === "all"} onClick={() => setOdFilter("all")} />
-            <FilterChip label="O" active={odFilter === "O"} onClick={() => setOdFilter("O")} />
-            <FilterChip label="D" active={odFilter === "D"} onClick={() => setOdFilter("D")} />
+            <FilterChip
+              label="O"
+              active={odFilter === "O"}
+              onClick={() => setOdFilter("O")}
+              activeClassName={OD_TONE.O}
+            />
+            <FilterChip
+              label="D"
+              active={odFilter === "D"}
+              onClick={() => setOdFilter("D")}
+              activeClassName={OD_TONE.D}
+            />
           </div>
 
           {division === "mixed" ? (
@@ -485,10 +496,14 @@ function FilterChip({
   label,
   active,
   onClick,
+  activeClassName,
 }: {
   label: string;
   active: boolean;
   onClick: () => void;
+  /** Override the default emerald active style — e.g. a per-side color
+   *  (see OD_TONE). */
+  activeClassName?: string;
 }) {
   return (
     <button
@@ -496,7 +511,8 @@ function FilterChip({
       aria-pressed={active}
       className={`rounded-full border px-2 py-0.5 ${
         active
-          ? "border-emerald-500 bg-emerald-50 font-medium text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300"
+          ? activeClassName ??
+            "border-emerald-500 bg-emerald-50 font-medium text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300"
           : "border-line-strong text-faint"
       }`}
     >

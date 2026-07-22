@@ -21,6 +21,8 @@ import {
 import {
   LINE_COLOR_SWATCH,
   LINE_COLORS,
+  OD_TONE,
+  SITUATION_TAG_COLOR,
   displayName,
   odTag,
   roleTag,
@@ -273,6 +275,7 @@ export function LinesEditor({ tournamentId }: { tournamentId: string }) {
                 label={s === "both" ? "O/D" : s}
                 active={side === s}
                 onClick={() => setSide(s)}
+                activeClassName={s === "both" ? undefined : OD_TONE[s]}
               />
             ))}
           </div>
@@ -286,6 +289,7 @@ export function LinesEditor({ tournamentId }: { tournamentId: string }) {
               label={t}
               active={tags.includes(t)}
               onClick={() => toggleSituationTag(t)}
+              activeClassName={SITUATION_TAG_COLOR[t]}
             />
           ))}
           {tags.filter((t) => !isSituationTag(t)).map((t) => (
@@ -519,10 +523,14 @@ function ToggleButton({
   label,
   active,
   onClick,
+  activeClassName,
 }: {
   label: string;
   active: boolean;
   onClick: () => void;
+  /** Override the default emerald active style — e.g. a per-side or
+   *  per-tag color (see OD_TONE, SITUATION_TAG_COLOR). */
+  activeClassName?: string;
 }) {
   return (
     <button
@@ -530,7 +538,8 @@ function ToggleButton({
       aria-pressed={active}
       className={`rounded-full border px-2 py-0.5 text-xs ${
         active
-          ? "border-emerald-500 bg-emerald-50 font-medium text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300"
+          ? activeClassName ??
+            "border-emerald-500 bg-emerald-50 font-medium text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300"
           : "border-line-strong text-faint"
       }`}
     >

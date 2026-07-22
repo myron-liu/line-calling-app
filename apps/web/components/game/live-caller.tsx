@@ -17,6 +17,7 @@ import { isRosterActive, type RosterSnapshotEntry } from "@/lib/storage/gameLog"
 import {
   LINE_COLOR_CHIP,
   ROLE_BADGE_COLOR,
+  SITUATION_TAG_COLOR,
   displayName,
   roleTag,
   sortRoster,
@@ -1090,10 +1091,14 @@ function TagFilterChip({
   label,
   active,
   onClick,
+  activeClassName,
 }: {
   label: string;
   active: boolean;
   onClick: () => void;
+  /** Override the default emerald active style — e.g. a per-tag color
+   *  (see SITUATION_TAG_COLOR). */
+  activeClassName?: string;
 }) {
   return (
     <button
@@ -1101,7 +1106,8 @@ function TagFilterChip({
       aria-pressed={active}
       className={`rounded-full border px-2 py-0.5 ${
         active
-          ? "border-emerald-500 bg-emerald-50 font-medium text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300"
+          ? activeClassName ??
+            "border-emerald-500 bg-emerald-50 font-medium text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300"
           : "border-line-strong text-faint"
       }`}
     >
@@ -1162,6 +1168,7 @@ function SavedLinesBar({
               label={t}
               active={tagFilter === t}
               onClick={() => onTagFilterChange(t)}
+              activeClassName={SITUATION_TAG_COLOR[t]}
             />
           ))}
         </div>
