@@ -99,6 +99,13 @@ export interface TournamentRoster {
 /** Coach-assigned color for a saved line/pod chip in the quick-lines bar. */
 export type LineColor = "red" | "green" | "blue" | "yellow" | "black" | "purple";
 
+/** Fixed situational categories for a line/pod, on top of any custom
+ *  free-form SavedLine.tags — always offered as quick-toggle tags in the
+ *  editor, and the live caller's quick-lines bar defaults its tag filter to
+ *  one of these based on game situation (see suggestedSituationTag). */
+export const SITUATION_TAGS = ["Kill", "Standard", "Developmental"] as const;
+export type SituationTag = (typeof SITUATION_TAGS)[number];
+
 /** A tournament-scoped reusable line/pod (§4.3) — each tournament has its
  *  own independent pool, since a team often reuses the same roster across
  *  several tournaments with different needs each time. */
@@ -122,6 +129,10 @@ export interface SavedLine {
   /** Hidden lines/pods stay in the saved list (still editable) but are
    *  excluded from the live caller's quick-lines bar. Undefined = false. */
   hidden?: boolean;
+  /** Free-form coach-assigned labels for organizing/filtering lines & pods in
+   *  the editor (e.g. "zone-D", "starters") — unlike color/side, not a fixed
+   *  enum. Undefined/empty = no tags. */
+  tags?: string[];
   createdAt: string;
 }
 

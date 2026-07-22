@@ -118,6 +118,9 @@ export const savedLines = pgTable("saved_lines", {
   color: text("color"), // "red" | "green" | "blue" | "yellow" | "black" | "purple" | null
   side: text("side"), // "O" | "D" | "both" | null
   hidden: boolean("hidden").notNull().default(false),
+  // Free-form coach-assigned labels for organizing/filtering lines & pods in
+  // the editor (e.g. "zone-D", "starters") — unlike color/side, not a fixed enum.
+  tags: jsonb("tags").notNull().default([]).$type<string[]>(),
   createdAt: createdAt(),
 });
 

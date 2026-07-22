@@ -2,12 +2,15 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
+  SITUATION_TAGS,
   genderStateLabel,
   ratioCounts,
+  suggestedSituationTag,
   validateLine,
   type GenderRatio,
   type PointResult,
   type SavedLine,
+  type SituationTag,
 } from "@shared/game-rules";
 import type { LiveGame } from "@/lib/game/useLiveGame";
 import { isRosterActive, type RosterSnapshotEntry } from "@/lib/storage/gameLog";
@@ -271,6 +274,25 @@ function LineBuilder({
     O: state.od === "O",
     D: state.od === "D",
   });
+  // Quick-lines tag filter (fixed situational vocabulary — see SITUATION_TAGS)
+  // defaults to a suggestion based on the game situation about to be played,
+  // but the coach can freely override it for this point; a new point remounts
+  // LineBuilder via its `key`, so the suggestion is recomputed fresh rather
+  // than fighting a manual choice mid-point. Only applied if at least one
+  // saved line/pod actually carries that tag — a team that hasn't adopted
+  // the situational tags yet should never have its whole quick-lines bar
+  // silently emptied out by a filter it never asked for.
+  const [tagFilter, setTagFilter] = useState<SituationTag | "all">(() => {
+    const suggestion = suggestedSituationTag(
+      game.gameCap,
+      state.ourScore,
+      state.theirScore,
+      state.halftimeReached,
+      points,
+    );
+    if (!suggestion) return "all";
+    return savedLines.some((l) => l.tags?.includes(suggestion)) ? suggestion : "all";
+  });
   // Prune anyone who becomes ineligible (e.g. marked injured mid-build) without
   // resetting the rest of the pick — this only fires within the same point, since
   // a new point remounts LineBuilder via its `key` and re-seeds from scratch.
@@ -392,6 +414,9 @@ function LineBuilder({
       return a.line.name.localeCompare(b.line.name);
     });
 
+  const visibleQuickLines =
+    tagFilter === "all" ? quickLines : quickLines.filter((x) => x.line.tags?.includes(tagFilter));
+
   // The exact saved line/pod that was on the field for the immediately
   // preceding point (if any exactly matches it), labeled "Just played" in the
   // quick-lines bar below. That label tracks any surviving overlap with the
@@ -500,7 +525,7 @@ function LineBuilder({
   return (
     <div className="space-y-3">
       <SavedLinesBar
-        lines={quickLines}
+        lines={visibleQuickLines}
         appliedIds={appliedLineIds}
         justPlayedId={justPlayedId}
         ratioLabel={need ? `${maxMMP}M / ${maxWMP}W` : "any 7"}
@@ -508,6 +533,8 @@ function LineBuilder({
         note={applyNote}
         open={quickLinesOpen}
         onOpenChange={setQuickLinesOpen}
+        tagFilter={tagFilter}
+        onTagFilterChange={setTagFilter}
       />
 
       <div className="flex items-center justify-between text-sm">
@@ -1059,6 +1086,30 @@ function InjuryManager({
 
 // ── Saved lines (quick-fill) ────────────────────────────────────────────────────
 
+function TagFilterChip({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      aria-pressed={active}
+      className={`rounded-full border px-2 py-0.5 ${
+        active
+          ? "border-emerald-500 bg-emerald-50 font-medium text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300"
+          : "border-line-strong text-faint"
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
 interface QuickLine {
   line: SavedLine;
   mmp: number;
@@ -1074,6 +1125,8 @@ function SavedLinesBar({
   note,
   open,
   onOpenChange,
+  tagFilter,
+  onTagFilterChange,
 }: {
   lines: QuickLine[];
   appliedIds: Set<string>;
@@ -1083,6 +1136,8 @@ function SavedLinesBar({
   note: string | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  tagFilter: SituationTag | "all";
+  onTagFilterChange: (tag: SituationTag | "all") => void;
 }) {
   return (
     <details
@@ -1095,9 +1150,26 @@ function SavedLinesBar({
       </summary>
 
       <div className="mt-2 space-y-2">
+        <div className="flex flex-wrap items-center gap-1.5 text-xs">
+          <TagFilterChip
+            label="All"
+            active={tagFilter === "all"}
+            onClick={() => onTagFilterChange("all")}
+          />
+          {SITUATION_TAGS.map((t) => (
+            <TagFilterChip
+              key={t}
+              label={t}
+              active={tagFilter === t}
+              onClick={() => onTagFilterChange(t)}
+            />
+          ))}
+        </div>
         {lines.length === 0 ? (
           <p className="text-xs text-faint">
-            No saved lines or pods fit this ratio yet.
+            {tagFilter === "all"
+              ? "No saved lines or pods fit this ratio yet."
+              : `No lines/pods tagged "${tagFilter}" fit this ratio.`}
           </p>
         ) : (
           <div className="flex flex-wrap gap-2">
@@ -1129,6 +1201,7 @@ function SavedLinesBar({
                       {line.side && line.side !== "both" ? ` · ${line.side}` : ""}
                       {" · "}
                       {mmp}M/{wmp}W · {line.useCount ?? 0}×
+                      {line.tags && line.tags.length > 0 && ` · ${line.tags.join(", ")}`}
                     </span>
                   </button>
                   {line.id === justPlayedId && (

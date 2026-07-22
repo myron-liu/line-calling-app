@@ -49,6 +49,7 @@ const genderRatio = z.enum(["4MMP_3WMP", "4WMP_3MMP"]);
 // null = a "time cap" game (no score cap; only a manual End game completes it).
 const gameCap = z.union([z.literal(13), z.literal(15), z.null()]);
 const lineColor = z.enum(["red", "green", "blue", "yellow", "black", "purple"]);
+const lineTags = z.array(z.string().trim().min(1).max(24)).max(15);
 const fieldSide = z.enum(["left", "right"]);
 const teamColor = z.enum(["light", "dark"]);
 
@@ -386,6 +387,7 @@ export const routes: Route[] = [
           playerIds: z.array(z.string()).min(1),
           color: lineColor.nullable().optional(),
           side: odPreference.nullable().optional(),
+          tags: lineTags.optional(),
         }),
       );
       const line = await q.createSavedLine({ id: newId(), tournamentId: id!, ...body });
@@ -406,6 +408,7 @@ export const routes: Route[] = [
           color: lineColor.nullable().optional(),
           side: odPreference.nullable().optional(),
           hidden: z.boolean().optional(),
+          tags: lineTags.optional(),
         }),
       );
       const line = await q.updateSavedLine(id!, body);

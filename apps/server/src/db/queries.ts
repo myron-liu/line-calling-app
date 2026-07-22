@@ -524,6 +524,7 @@ export async function createSavedLine(input: {
   playerIds: string[];
   color?: LineColor | null;
   side?: ODPreference | null;
+  tags?: string[];
 }): Promise<SavedLine> {
   const existing = await db
     .select()
@@ -539,7 +540,12 @@ export async function createSavedLine(input: {
     }
     const [row] = await db
       .update(savedLines)
-      .set({ playerIds: input.playerIds, color: input.color, side: input.side })
+      .set({
+        playerIds: input.playerIds,
+        color: input.color,
+        side: input.side,
+        tags: input.tags ?? [],
+      })
       .where(eq(savedLines.id, match.id))
       .returning();
     return toSavedLine(row!);
@@ -554,6 +560,7 @@ export async function createSavedLine(input: {
       playerIds: input.playerIds,
       color: input.color,
       side: input.side,
+      tags: input.tags ?? [],
     })
     .returning();
   return toSavedLine(row!);
@@ -575,6 +582,7 @@ export async function updateSavedLine(
     color?: LineColor | null;
     side?: ODPreference | null;
     hidden?: boolean;
+    tags?: string[];
   },
 ): Promise<SavedLine | null> {
   const [existing] = await db.select().from(savedLines).where(eq(savedLines.id, id));
@@ -642,6 +650,7 @@ function toSavedLine(row: typeof savedLines.$inferSelect): SavedLine {
     color: (row.color as LineColor) ?? undefined,
     side: (row.side as ODPreference) ?? undefined,
     hidden: row.hidden,
+    tags: row.tags.length > 0 ? row.tags : undefined,
     createdAt: row.createdAt.toISOString(),
   };
 }

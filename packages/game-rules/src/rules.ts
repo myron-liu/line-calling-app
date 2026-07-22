@@ -2,7 +2,7 @@
 // No I/O, no dates, no randomness: every function is a pure function of its inputs
 // so it can be exhaustively unit-tested and run identically on client and server.
 
-import type { GameCapMode, GenderRatio, OD, Game, Point } from "./types";
+import type { GameCapMode, GenderRatio, OD, Game, Point, SituationTag } from "./types";
 
 // ── Gender ratio (ABBA) — §5 ─────────────────────────────────────────────────
 
@@ -182,4 +182,65 @@ export function playerPointOutcomes(
  *  score threshold — see GameCapMode). */
 export function halfScoreForCap(cap: GameCapMode): number | null {
   return cap === null ? null : cap === 13 ? 7 : 8;
+}
+
+// ── Situational tag suggestion (quick-lines default filter) ─────────────────
+
+/**
+ * Advisory default for which fixed SituationTag the live caller's quick-lines
+ * tag filter should start on for the point about to be built — the coach can
+ * always override it for that point (see live-caller.tsx, which recomputes
+ * fresh each point rather than fighting a manual choice mid-point).
+ *
+ * "Tight" (margin <= 2) and "comfortably ahead" (margin >= 4) are judgment
+ * calls with no universal definition — easy to retune here if they don't
+ * match how a coach actually plays.
+ *
+ * Priority (first match wins) favors your sharpest personnel whenever
+ * something concerning is happening, over just riding a comfortable lead:
+ *   1. Kill    — broken twice in a row; this point could end a half or the
+ *                game (someone's one point from halfScore/gameCap, i.e.
+ *                "Universe" or the point before it); or it's the first point
+ *                back from halftime in a tight game.
+ *   2. Developmental — ahead by 4+.
+ *   3. Standard — tight, with no sharper Kill trigger above.
+ *   4. null — no strong situational signal; leave the filter on "All".
+ */
+export function suggestedSituationTag(
+  gameCap: GameCapMode,
+  ourScore: number,
+  theirScore: number,
+  halftimeReached: boolean,
+  points: Point[],
+): SituationTag | null {
+  const margin = Math.abs(ourScore - theirScore);
+  const isTight = margin <= 2;
+
+  // True iff either score is exactly one point short of `threshold` — i.e.
+  // this point, if won, would reach it.
+  const nears = (threshold: number | null) =>
+    threshold !== null && (ourScore === threshold - 1 || theirScore === threshold - 1);
+
+  const isHalftimePoint = !halftimeReached && nears(halfScoreForCap(gameCap));
+  const isUniverseOrNearUniverse =
+    gameCap !== null && (nears(gameCap) || nears(gameCap - 1));
+  const isFirstAfterHalf =
+    halftimeReached && !points.some((p) => p.isFirstAfterHalftime);
+
+  const completed = points.filter((p) => p.result !== undefined);
+  const lastTwo = completed.slice(-2);
+  const brokenTwiceInARow =
+    lastTwo.length === 2 && lastTwo.every((p) => p.od === "O" && p.result === "them");
+
+  if (
+    brokenTwiceInARow ||
+    isHalftimePoint ||
+    isUniverseOrNearUniverse ||
+    (isFirstAfterHalf && isTight)
+  ) {
+    return "Kill";
+  }
+  if (ourScore - theirScore >= 4) return "Developmental";
+  if (isTight) return "Standard";
+  return null;
 }

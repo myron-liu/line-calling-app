@@ -2,12 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import type {
-  LineColor,
-  ODPreference,
-  Player,
-  SavedLine,
-  Tournament,
+import {
+  SITUATION_TAGS,
+  type LineColor,
+  type ODPreference,
+  type Player,
+  type SavedLine,
+  type Tournament,
 } from "@shared/game-rules";
 import { readPlayers } from "@/lib/storage/teams";
 import { findTournament } from "@/lib/storage/tournaments";
@@ -41,8 +42,11 @@ export function LinesEditor({ tournamentId }: { tournamentId: string }) {
   const [name, setName] = useState("");
   const [color, setColor] = useState<LineColor | null>(null);
   const [side, setSide] = useState<ODPreference>("both");
+  const [tags, setTags] = useState<string[]>([]);
+  const [tagInput, setTagInput] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<SavedLine | null>(null);
+  const [activeTagFilters, setActiveTagFilters] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     findTournament(tournamentId).then((t) => {
@@ -66,6 +70,30 @@ export function LinesEditor({ tournamentId }: { tournamentId: string }) {
         a.name.localeCompare(b.name),
     );
   }, [lines]);
+
+  // Every tag currently in use across this tournament's lines/pods, for the
+  // filter row below — only shown once at least one line/pod actually has a
+  // tag, so an untagged team never sees empty filter chrome.
+  const allTags = useMemo(() => {
+    const set = new Set<string>();
+    for (const l of lines) for (const t of l.tags ?? []) set.add(t);
+    return [...set].sort((a, b) => a.localeCompare(b));
+  }, [lines]);
+
+  // A line/pod matches iff it carries at least one of the active filter tags
+  // (OR, not AND) — with none active, everything shows.
+  const filteredLines = useMemo(() => {
+    if (activeTagFilters.size === 0) return sortedLines;
+    return sortedLines.filter((l) => l.tags?.some((t) => activeTagFilters.has(t)));
+  }, [sortedLines, activeTagFilters]);
+
+  const toggleTagFilter = (tag: string) =>
+    setActiveTagFilters((cur) => {
+      const next = new Set(cur);
+      if (next.has(tag)) next.delete(tag);
+      else next.add(tag);
+      return next;
+    });
 
   if (tournament === undefined) return <p className="text-muted">Loading…</p>;
   if (tournament === null) {
@@ -104,6 +132,8 @@ export function LinesEditor({ tournamentId }: { tournamentId: string }) {
     setName("");
     setColor(null);
     setSide("both");
+    setTags([]);
+    setTagInput("");
     setEditingId(null);
   };
 
@@ -112,11 +142,28 @@ export function LinesEditor({ tournamentId }: { tournamentId: string }) {
     setName(line.name);
     setColor(line.color ?? null);
     setSide(line.side ?? "both");
+    setTags(line.tags ?? []);
+    setTagInput("");
     setEditingId(line.id);
     document
       .getElementById("line-builder")
       ?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
+
+  const addTag = () => {
+    const t = tagInput.trim();
+    if (!t) return;
+    setTags((cur) => (cur.some((x) => x.toLowerCase() === t.toLowerCase()) ? cur : [...cur, t]));
+    setTagInput("");
+  };
+
+  const removeTag = (t: string) => setTags((cur) => cur.filter((x) => x !== t));
+
+  const isSituationTag = (t: string): boolean =>
+    (SITUATION_TAGS as readonly string[]).includes(t);
+
+  const toggleSituationTag = (t: string) =>
+    setTags((cur) => (cur.includes(t) ? cur.filter((x) => x !== t) : [...cur, t]));
 
   const save = async () => {
     if (!name.trim() || selected.length === 0) return;
@@ -126,9 +173,10 @@ export function LinesEditor({ tournamentId }: { tournamentId: string }) {
         playerIds: selected,
         color,
         side,
+        tags,
       });
     } else {
-      await createSavedLine(tournamentId, name.trim(), selected, { color, side });
+      await createSavedLine(tournamentId, name.trim(), selected, { color, side, tags });
     }
     refresh();
     resetBuilder();
@@ -230,6 +278,46 @@ export function LinesEditor({ tournamentId }: { tournamentId: string }) {
           </div>
         </div>
 
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-xs text-faint">Tags</span>
+          {SITUATION_TAGS.map((t) => (
+            <ToggleButton
+              key={t}
+              label={t}
+              active={tags.includes(t)}
+              onClick={() => toggleSituationTag(t)}
+            />
+          ))}
+          {tags.filter((t) => !isSituationTag(t)).map((t) => (
+            <span
+              key={t}
+              className="flex items-center gap-1 rounded-full border border-line-strong bg-surface-2 px-2 py-0.5 text-xs"
+            >
+              {t}
+              <button
+                onClick={() => removeTag(t)}
+                aria-label={`Remove tag ${t}`}
+                className="text-faint hover:text-fg"
+              >
+                ×
+              </button>
+            </span>
+          ))}
+          <input
+            value={tagInput}
+            onChange={(e) => setTagInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === ",") {
+                e.preventDefault();
+                addTag();
+              }
+            }}
+            onBlur={addTag}
+            placeholder="Add tag…"
+            className="min-w-[6rem] flex-1 rounded border border-line-strong px-2 py-1 text-xs"
+          />
+        </div>
+
         {players.length === 0 ? (
           <p className="text-sm text-muted">No players on the team roster yet.</p>
         ) : (
@@ -298,12 +386,35 @@ export function LinesEditor({ tournamentId }: { tournamentId: string }) {
 
       {/* Existing lines & pods */}
       <div className="space-y-2">
-        <h2 className="font-medium">Saved ({lines.length})</h2>
+        <h2 className="font-medium">Saved ({filteredLines.length})</h2>
+        {allTags.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5 text-xs">
+            <span className="text-faint">Filter by tag:</span>
+            {allTags.map((t) => (
+              <ToggleButton
+                key={t}
+                label={t}
+                active={activeTagFilters.has(t)}
+                onClick={() => toggleTagFilter(t)}
+              />
+            ))}
+            {activeTagFilters.size > 0 && (
+              <button
+                onClick={() => setActiveTagFilters(new Set())}
+                className="text-muted hover:text-fg"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        )}
         {lines.length === 0 ? (
           <p className="text-sm text-muted">No saved lines or pods yet.</p>
+        ) : filteredLines.length === 0 ? (
+          <p className="text-sm text-muted">No lines or pods match the selected tags.</p>
         ) : (
           <ul className="space-y-2">
-            {sortedLines.map((line) => {
+            {filteredLines.map((line) => {
               const c = composition(line.playerIds);
               const isPod = line.playerIds.length < 7;
               const names = line.playerIds
@@ -356,6 +467,18 @@ export function LinesEditor({ tournamentId }: { tournamentId: string }) {
                     </div>
                   </div>
                   <p className="text-faint">{names.join(", ")}</p>
+                  {line.tags && line.tags.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {line.tags.map((t) => (
+                        <span
+                          key={t}
+                          className="rounded-full bg-surface-2 px-1.5 py-0.5 text-[10px] text-faint"
+                        >
+                          {t}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </li>
               );
             })}

@@ -71,6 +71,13 @@
       "when": 1784532455100,
       "tag": "0009_absurd_mastermind",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1784692987583,
+      "tag": "0010_ambiguous_arclight",
+      "breakpoints": true
     }
   ]
 }

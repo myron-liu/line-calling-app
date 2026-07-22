@@ -11,6 +11,7 @@ import {
   halfScoreForCap,
   teamPointOutcomes,
   playerPointOutcomes,
+  suggestedSituationTag,
 } from "./rules";
 import { validateLine, lineWarnings, type LinePlayer } from "./validation";
 import type { GenderRatio, Point } from "./types";
@@ -247,6 +248,83 @@ describe("halfScoreForCap (§4.2)", () => {
   test("13 -> 7, 15 -> 8", () => {
     expect(halfScoreForCap(13)).toBe(7);
     expect(halfScoreForCap(15)).toBe(8);
+  });
+});
+
+describe("suggestedSituationTag (quick-lines default tag filter)", () => {
+  const mk = (n: number, od: "O" | "D", result: "us" | "them", firstAfterHalf = false): Point => ({
+    id: `p${n}`,
+    gameId: "g",
+    pointNumber: n,
+    od,
+    lineup: [],
+    result,
+    isFirstAfterHalftime: firstAfterHalf,
+  });
+
+  test("tight game with no sharper trigger -> Standard", () => {
+    expect(suggestedSituationTag(15, 5, 4, false, [])).toBe("Standard");
+    expect(suggestedSituationTag(15, 4, 5, false, [])).toBe("Standard");
+  });
+
+  test("ahead by 4+ -> Developmental", () => {
+    expect(suggestedSituationTag(15, 10, 6, false, [])).toBe("Developmental");
+  });
+
+  test("behind by 4+ is not Developmental (must be ahead, not just a big margin)", () => {
+    expect(suggestedSituationTag(15, 6, 10, false, [])).toBeNull();
+  });
+
+  test("no signal at all -> null", () => {
+    // margin 3: not tight (<=2), not ahead by 4+, no half/universe/broken trigger.
+    expect(suggestedSituationTag(15, 6, 3, false, [])).toBeNull();
+  });
+
+  test("this point could reach halfScore -> Kill", () => {
+    // 15-cap -> halfScore 8; ourScore 7 means winning this point reaches 8.
+    expect(suggestedSituationTag(15, 7, 3, false, [])).toBe("Kill");
+  });
+
+  test("halftime point doesn't fire once halftime is already reached", () => {
+    expect(suggestedSituationTag(15, 7, 3, true, [])).not.toBe("Kill");
+  });
+
+  test("universe point (someone at cap-1) -> Kill", () => {
+    expect(suggestedSituationTag(15, 14, 10, true, [])).toBe("Kill");
+  });
+
+  test("one point away from universe (someone at cap-2) -> Kill", () => {
+    expect(suggestedSituationTag(15, 13, 10, true, [])).toBe("Kill");
+  });
+
+  test("broken twice in a row -> Kill, even in a blowout", () => {
+    const points = [mk(1, "O", "them"), mk(2, "O", "them")];
+    expect(suggestedSituationTag(15, 10, 4, false, points)).toBe("Kill");
+  });
+
+  test("broken once, then held -> not triggered by broken-twice rule", () => {
+    const points = [mk(1, "O", "them"), mk(2, "O", "us")];
+    expect(suggestedSituationTag(15, 6, 5, false, points)).toBe("Standard");
+  });
+
+  test("first point back from halftime in a tight game -> Kill", () => {
+    // halftimeReached=true, no completed point yet flagged isFirstAfterHalftime
+    // -> the point about to be built is the first one back from half.
+    expect(suggestedSituationTag(15, 8, 7, true, [])).toBe("Kill");
+  });
+
+  test("first point back from halftime in a blowout -> not Kill", () => {
+    expect(suggestedSituationTag(15, 12, 4, true, [])).toBe("Developmental");
+  });
+
+  test("second point back from halftime doesn't retrigger the first-after-half rule", () => {
+    const points = [mk(1, "O", "us", true)];
+    expect(suggestedSituationTag(15, 8, 7, true, points)).toBe("Standard");
+  });
+
+  test("time-cap games (gameCap null) skip half/universe triggers", () => {
+    expect(suggestedSituationTag(null, 6, 5, false, [])).toBe("Standard");
+    expect(suggestedSituationTag(null, 10, 6, false, [])).toBe("Developmental");
   });
 });
 

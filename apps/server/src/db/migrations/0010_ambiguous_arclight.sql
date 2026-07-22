@@ -1,0 +1,1 @@
+ALTER TABLE "saved_lines" ADD COLUMN "tags" jsonb DEFAULT '[]'::jsonb NOT NULL;
