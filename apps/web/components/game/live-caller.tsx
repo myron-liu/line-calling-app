@@ -5,9 +5,11 @@ import {
   SITUATION_TAGS,
   genderStateLabel,
   ratioCounts,
+  ratioForPoint,
   suggestedSituationTag,
   validateLine,
   type GenderRatio,
+  type OD,
   type PointResult,
   type SavedLine,
   type SituationTag,
@@ -26,6 +28,13 @@ import {
 // The live line caller (§8). Drives the engine hook; only reads/writes localStorage.
 export function LiveCaller({ live }: { live: LiveGame }) {
   const { game, roster, state, carryOver, actions, error } = live;
+  // The next line prepared during the current point_in_progress phase (see
+  // InProgressControls) — seeds the following point's LineBuilder the moment
+  // it opens, so confirming it is a single tap instead of rebuilding from
+  // scratch. A fresh point_in_progress phase always starts this empty (its
+  // embedded prepare-mode LineBuilder reports its own initial empty selection
+  // right on mount), so nothing stale can leak into a later point.
+  const [nextLineDraft, setNextLineDraft] = useState<string[]>([]);
 
   return (
     <div className="space-y-4">
@@ -36,9 +45,19 @@ export function LiveCaller({ live }: { live: LiveGame }) {
         </p>
       )}
       {state.phase === "awaiting_line" && (
-        <LineBuilder live={live} key={`p${state.currentPointNumber}`} seed={carryOver} />
+        <LineBuilder
+          live={live}
+          key={`p${state.currentPointNumber}`}
+          seed={nextLineDraft.length > 0 ? nextLineDraft : carryOver}
+          mode="confirm"
+          pointNumber={state.currentPointNumber}
+          genderRatio={state.genderRatio}
+          od={state.od}
+        />
       )}
-      {state.phase === "point_in_progress" && <InProgressControls live={live} />}
+      {state.phase === "point_in_progress" && (
+        <InProgressControls live={live} onNextLineDraftChange={setNextLineDraft} />
+      )}
 
       <SecondaryControls live={live} />
     </div>
@@ -195,9 +214,32 @@ type SortMode = "roster" | "recency" | "playtime";
 function LineBuilder({
   live,
   seed,
+  mode,
+  pointNumber,
+  genderRatio,
+  od,
+  onSelectionChange,
 }: {
   live: LiveGame;
   seed: string[] | null;
+  /** "confirm" is the normal awaiting_line flow (targets the current point,
+   *  ends in a Confirm-line button). "prepare" is a second, embedded instance
+   *  rendered inside InProgressControls while the current point is still
+   *  playing out — it targets the point AFTER that one, has no confirm
+   *  action of its own, and just reports its selection upward via
+   *  onSelectionChange so it can seed the real LineBuilder the moment that
+   *  next point actually opens. */
+  mode: "confirm" | "prepare";
+  /** The point this instance is building for — state.currentPointNumber for
+   *  "confirm", one more than that for "prepare". */
+  pointNumber: number;
+  /** Undefined for a non-mixed team either way. */
+  genderRatio: GenderRatio | undefined;
+  /** Undefined in "prepare" mode: which side you'll be on next depends on
+   *  who wins the point still in progress, so it genuinely isn't known yet
+   *  (see odForPoint in rules.ts) — only the gender ratio can be. */
+  od: OD | undefined;
+  onSelectionChange?: (ids: string[]) => void;
 }) {
   const { game, roster, state, savedLines, points, actions } = live;
   const isMixed = !!game.startingGenderRatio;
@@ -233,32 +275,49 @@ function LineBuilder({
   const dIds = useMemo(() => new Set(dGroup.map((p) => p.playerId)), [dGroup]);
 
   // Points sat out since each player's last start (never-played = all completed
-  // points so far). Flags long benches in the roster columns below.
+  // points so far). Flags long benches in the roster columns below. In
+  // "prepare" mode, state.lastPlayedPoint/pointsPlayed don't reflect the
+  // still-in-progress point yet (only completed points count there — see
+  // rules.ts), even though everyone on state.currentLineup is unambiguously
+  // about to have played it — so they're treated as having just played it.
+  const completedThrough = pointNumber - 1;
   const benchGap = useMemo(() => {
-    const completed = state.currentPointNumber - 1;
     const gaps: Record<string, number> = {};
     for (const p of roster) {
-      gaps[p.playerId] = completed - (state.lastPlayedPoint[p.playerId] ?? 0);
+      const last =
+        mode === "prepare" && state.currentLineup.includes(p.playerId)
+          ? completedThrough
+          : (state.lastPlayedPoint[p.playerId] ?? 0);
+      gaps[p.playerId] = completedThrough - last;
     }
     return gaps;
-  }, [roster, state.lastPlayedPoint, state.currentPointNumber]);
+  }, [mode, roster, state.lastPlayedPoint, state.currentLineup, completedThrough]);
 
   // Who started the immediately preceding point — shown as "Just played"
   // instead of a numeric gap. Checked against lastPlayedPoint directly
   // (rather than benchGap === 0) so a player who's never started a point
   // doesn't false-positive at point 1, where everyone's gap defaults to 0.
   const justPlayedIds = useMemo(() => {
-    const completed = state.currentPointNumber - 1;
-    if (completed <= 0) return new Set<string>();
+    if (mode === "prepare") return new Set(state.currentLineup);
+    if (completedThrough <= 0) return new Set<string>();
     return new Set(
       roster
-        .filter((p) => state.lastPlayedPoint[p.playerId] === completed)
+        .filter((p) => state.lastPlayedPoint[p.playerId] === completedThrough)
         .map((p) => p.playerId),
     );
-  }, [roster, state.lastPlayedPoint, state.currentPointNumber]);
+  }, [mode, state.currentLineup, roster, state.lastPlayedPoint, completedThrough]);
+
+  // Same "still in progress" adjustment as benchGap, for the "fewest points
+  // played" sort.
+  const effectivePointsPlayed = useMemo(() => {
+    if (mode !== "prepare") return state.pointsPlayed;
+    const merged = { ...state.pointsPlayed };
+    for (const id of state.currentLineup) merged[id] = (merged[id] ?? 0) + 1;
+    return merged;
+  }, [mode, state.pointsPlayed, state.currentLineup]);
 
   // Selectable slots per gender: the ratio in Mixed, otherwise up to a full line.
-  const need = state.genderRatio ? ratioCounts(state.genderRatio) : null;
+  const need = genderRatio ? ratioCounts(genderRatio) : null;
   const maxMMP = need ? need.mmp : 7;
   const maxWMP = need ? need.wmp : 7;
 
@@ -270,11 +329,20 @@ function LineBuilder({
   // Which O/D accordion(s) are open — starts on whichever matches this point's
   // side, but applying a saved line/pod can force one or both open too (see
   // applyLine below). Genuinely controlled (not just an initial value) so we
-  // can open it programmatically after the initial render.
+  // can open it programmatically after the initial render. In "prepare" mode
+  // od is undefined (not known yet), so both start open — there's no "wrong"
+  // side to default-collapse when either is still possible.
   const [openSections, setOpenSections] = useState({
-    O: state.od === "O",
-    D: state.od === "D",
+    O: od !== "D",
+    D: od !== "O",
   });
+
+  // "prepare" mode has no confirm step of its own — report the selection
+  // upward so it can seed the real LineBuilder once this point actually opens.
+  useEffect(() => {
+    onSelectionChange?.(selected);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected]);
   // Quick-lines tag filter (fixed situational vocabulary — see SITUATION_TAGS)
   // defaults to a suggestion based on the game situation about to be played,
   // but the coach can freely override it for this point; a new point remounts
@@ -346,7 +414,7 @@ function LineBuilder({
 
   const result = validateLine({
     division: isMixed ? "mixed" : "open",
-    requiredRatio: state.genderRatio,
+    requiredRatio: genderRatio,
     players: selectedPlayers,
     eligiblePlayerIds: eligibleIds,
   });
@@ -384,11 +452,14 @@ function LineBuilder({
     }
     return { mmp, wmp };
   };
-  // Lines/pods tagged for the current point's side sort first (untagged/"both"
-  // in the middle, the opposite side last), so the relevant quick-fills are
-  // right there without scanning past ones for the other side.
+  // Lines/pods tagged for this point's side sort first (untagged/"both" in the
+  // middle, the opposite side last), so the relevant quick-fills are right
+  // there without scanning past ones for the other side. In "prepare" mode
+  // there's no known side yet, so side-tagged pods rank equally — only
+  // untagged/"both" ones (equally useful either way) get a boost.
   const sideMatchRank = (lineSide: SavedLine["side"]): number => {
-    if (lineSide === state.od) return 0;
+    if (!od) return !lineSide || lineSide === "both" ? 0 : 1;
+    if (lineSide === od) return 0;
     if (!lineSide || lineSide === "both") return 1;
     return 2;
   };
@@ -600,7 +671,7 @@ function LineBuilder({
         players={oGroup}
         selected={selected}
         slotLabels={slotLabels}
-        pointsPlayed={state.pointsPlayed}
+        pointsPlayed={effectivePointsPlayed}
         benchGap={benchGap}
         justPlayedIds={justPlayedIds}
         sortMode={sortMode}
@@ -617,7 +688,7 @@ function LineBuilder({
         players={dGroup}
         selected={selected}
         slotLabels={slotLabels}
-        pointsPlayed={state.pointsPlayed}
+        pointsPlayed={effectivePointsPlayed}
         benchGap={benchGap}
         justPlayedIds={justPlayedIds}
         sortMode={sortMode}
@@ -637,25 +708,29 @@ function LineBuilder({
         onSave={(name) => actions.saveLine(name, selected)}
       />
 
-      <button
-        disabled={!result.valid}
-        onClick={() => {
-          // Only count a line/pod as "used" once it actually lands on the
-          // field — checked against the final selection, not whatever was
-          // true when it was tapped (the pick can still change afterward).
-          for (const line of savedLines) {
-            if (isLineApplied(line)) actions.recordLineUsage(line.id);
-          }
-          actions.confirmLine(selected);
-        }}
-        className="w-full rounded-lg bg-emerald-600 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:bg-disabled"
-      >
-        Confirm line ▸
-      </button>
-      {!result.valid && result.issues[0] && (
-        <p className="text-center text-xs text-muted">
-          {result.issues[0].message}
-        </p>
+      {mode === "confirm" && (
+        <>
+          <button
+            disabled={!result.valid}
+            onClick={() => {
+              // Only count a line/pod as "used" once it actually lands on the
+              // field — checked against the final selection, not whatever was
+              // true when it was tapped (the pick can still change afterward).
+              for (const line of savedLines) {
+                if (isLineApplied(line)) actions.recordLineUsage(line.id);
+              }
+              actions.confirmLine(selected);
+            }}
+            className="w-full rounded-lg bg-emerald-600 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:bg-disabled"
+          >
+            Confirm line ▸
+          </button>
+          {!result.valid && result.issues[0] && (
+            <p className="text-center text-xs text-muted">
+              {result.issues[0].message}
+            </p>
+          )}
+        </>
       )}
     </div>
   );
@@ -1284,16 +1359,92 @@ function SaveLineButton({
 
 // ── In-progress controls ────────────────────────────────────────────────────────
 
-function InProgressControls({ live }: { live: LiveGame }) {
-  const { actions } = live;
+function InProgressControls({
+  live,
+  onNextLineDraftChange,
+}: {
+  live: LiveGame;
+  onNextLineDraftChange: (ids: string[]) => void;
+}) {
+  const { game, roster, state, actions } = live;
+  const nextPointNumber = state.currentPointNumber + 1;
+  const nextGenderRatio = game.startingGenderRatio
+    ? ratioForPoint(nextPointNumber, game.startingGenderRatio)
+    : undefined;
+  const currentLine = sortRoster(
+    roster.filter((p) => state.currentLineup.includes(p.playerId)),
+  );
+
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3">
         <ScoreButton label="We scored ▸" onClick={() => actions.recordResult("us")} tone="emerald" />
         <ScoreButton label="They scored ▸" onClick={() => actions.recordResult("them")} tone="neutral" />
       </div>
+
+      <CurrentLineDisplay players={currentLine} />
+
       <InjuryFlow live={live} />
+
+      <div className="space-y-3 border-t border-line pt-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold">
+            Prepare next line <span className="font-normal text-faint">· Point {nextPointNumber}</span>
+          </h2>
+          {nextGenderRatio && <NextRatioBadge ratio={nextGenderRatio} />}
+        </div>
+        <LineBuilder
+          live={live}
+          seed={null}
+          mode="prepare"
+          pointNumber={nextPointNumber}
+          genderRatio={nextGenderRatio}
+          od={undefined}
+          onSelectionChange={onNextLineDraftChange}
+        />
+      </div>
     </div>
+  );
+}
+
+// Read-only display of who's on the field right now, so the coach doesn't
+// have to scroll back up to the point log to remember while prepping the
+// next line below.
+function CurrentLineDisplay({ players }: { players: RosterSnapshotEntry[] }) {
+  if (players.length === 0) return null;
+  return (
+    <div className="rounded-lg border border-line p-2">
+      <p className="mb-1.5 text-xs font-medium uppercase tracking-wide text-faint">
+        Current line
+      </p>
+      <div className="flex flex-wrap gap-1.5 text-sm">
+        {players.map((p) => (
+          <span
+            key={p.playerId}
+            className={`rounded-full border px-2 py-0.5 ${
+              p.genderMatch === "MMP" ? GENDER.MMP.idle : GENDER.WMP.idle
+            }`}
+          >
+            {displayName(p)}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Same tone convention as the header's RatioBadge (sky = MMP majority, rose =
+// WMP majority), just for the point after the one in progress.
+function NextRatioBadge({ ratio }: { ratio: GenderRatio }) {
+  const need = ratioCounts(ratio);
+  const isMmpMajority = ratio === "4MMP_3WMP";
+  const tone = isMmpMajority
+    ? "bg-sky-100 dark:bg-sky-500/20 text-sky-800 dark:text-sky-300"
+    : "bg-rose-100 dark:bg-rose-500/20 text-rose-800 dark:text-rose-300";
+  return (
+    <span className={`rounded px-2 py-0.5 text-xs font-medium ${tone}`}>
+      Next: {need.mmp} MMP / {need.wmp} WMP
+    </span>
   );
 }
 
