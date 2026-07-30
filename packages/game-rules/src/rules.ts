@@ -105,6 +105,24 @@ export function lastPlayedPoint(points: Point[]): Record<string, number> {
   return last;
 }
 
+/**
+ * Each player's total time on the field, in seconds — same counting
+ * convention as pointsPlayed: only completed points with both clock
+ * timestamps count, credited to the STARTING lineup (a mid-point injury
+ * replacement doesn't split the point's duration between the two players).
+ * Points missing a timestamp (synced from before the game clock existed, or
+ * still in progress) simply don't contribute.
+ */
+export function playerSecondsPlayed(points: Point[]): Record<string, number> {
+  const seconds: Record<string, number> = {};
+  for (const p of points) {
+    if (p.result === undefined || !p.startedAt || !p.endedAt) continue;
+    const duration = (new Date(p.endedAt).getTime() - new Date(p.startedAt).getTime()) / 1000;
+    for (const id of p.lineup) seconds[id] = (seconds[id] ?? 0) + duration;
+  }
+  return seconds;
+}
+
 // ── Point outcomes (holds/breaks) — recap stats ─────────────────────────────
 
 /**

@@ -8,6 +8,7 @@ import {
   odForPoint,
   pointsPlayed,
   lastPlayedPoint,
+  playerSecondsPlayed,
   halfScoreForCap,
   teamPointOutcomes,
   playerPointOutcomes,
@@ -169,6 +170,56 @@ describe("pointsPlayed (§4.4)", () => {
     const last = lastPlayedPoint(log);
     expect(last["a"]).toBe(1);
     expect(last["z"]).toBeUndefined();
+  });
+});
+
+describe("playerSecondsPlayed (§4.4, game clock)", () => {
+  const mk = (
+    n: number,
+    lineup: string[],
+    result: "us" | "them" | undefined,
+    startedAt?: string,
+    endedAt?: string,
+    substitutions?: { injuredPlayerId: string; replacementPlayerId: string }[],
+  ): Point => ({
+    id: `p${n}`,
+    gameId: "g",
+    pointNumber: n,
+    od: "O",
+    lineup,
+    result,
+    substitutions,
+    isFirstAfterHalftime: false,
+    startedAt,
+    endedAt,
+  });
+
+  test("credits each starter with the point's full duration", () => {
+    const log = [
+      mk(1, ["a", "b", "c"], "us", "2024-01-01T00:00:00Z", "2024-01-01T00:01:30Z"),
+      mk(2, ["a", "b", "d"], "them", "2024-01-01T00:02:00Z", "2024-01-01T00:02:45Z"),
+    ];
+    expect(playerSecondsPlayed(log)).toEqual({ a: 135, b: 135, c: 90, d: 45 });
+  });
+
+  test("a mid-point injury replacement doesn't split the duration", () => {
+    const log = [
+      mk(1, ["a", "b", "c"], "us", "2024-01-01T00:00:00Z", "2024-01-01T00:01:00Z", [
+        { injuredPlayerId: "a", replacementPlayerId: "z" },
+      ]),
+    ];
+    const seconds = playerSecondsPlayed(log);
+    expect(seconds["a"]).toBe(60);
+    expect(seconds["z"]).toBeUndefined();
+  });
+
+  test("in-progress and legacy (no-timestamp) points don't contribute", () => {
+    const log = [
+      mk(1, ["a", "b"], "us", "2024-01-01T00:00:00Z", "2024-01-01T00:01:00Z"),
+      mk(2, ["a", "c"], undefined, "2024-01-01T00:02:00Z"), // in progress
+      mk(3, ["a", "d"], "them"), // legacy, no timestamps at all
+    ];
+    expect(playerSecondsPlayed(log)).toEqual({ a: 60, b: 60 });
   });
 });
 

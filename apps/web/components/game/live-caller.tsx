@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   SITUATION_TAGS,
   genderStateLabel,
+  playerSecondsPlayed,
   ratioCounts,
   ratioForPoint,
   suggestedSituationTag,
@@ -242,7 +243,7 @@ const GENDER = {
   },
 } as const;
 
-type SortMode = "roster" | "recency" | "playtime";
+type SortMode = "roster" | "recency" | "playtime" | "minutes";
 
 function LineBuilder({
   live,
@@ -348,6 +349,11 @@ function LineBuilder({
     for (const id of state.currentLineup) merged[id] = (merged[id] ?? 0) + 1;
     return merged;
   }, [mode, state.pointsPlayed, state.currentLineup]);
+
+  // Each player's total time on the field so far (§4.4) — shown next to their
+  // points-played count and used for the "Least minutes" sort. Only completed
+  // points count (see playerSecondsPlayed), same convention as points played.
+  const secondsPlayed = useMemo(() => playerSecondsPlayed(points), [points]);
 
   // Selectable slots per gender: the ratio in Mixed, otherwise up to a full line.
   const need = genderRatio ? ratioCounts(genderRatio) : null;
@@ -694,6 +700,11 @@ function LineBuilder({
           active={sortMode === "playtime"}
           onClick={() => setSortMode("playtime")}
         />
+        <SortToggleButton
+          label="Least minutes"
+          active={sortMode === "minutes"}
+          onClick={() => setSortMode("minutes")}
+        />
       </div>
 
       <ODAccordion
@@ -705,6 +716,7 @@ function LineBuilder({
         selected={selected}
         slotLabels={slotLabels}
         pointsPlayed={effectivePointsPlayed}
+        secondsPlayed={secondsPlayed}
         benchGap={benchGap}
         justPlayedIds={justPlayedIds}
         sortMode={sortMode}
@@ -722,6 +734,7 @@ function LineBuilder({
         selected={selected}
         slotLabels={slotLabels}
         pointsPlayed={effectivePointsPlayed}
+        secondsPlayed={secondsPlayed}
         benchGap={benchGap}
         justPlayedIds={justPlayedIds}
         sortMode={sortMode}
@@ -831,6 +844,7 @@ function ODAccordion({
   selected,
   slotLabels,
   pointsPlayed,
+  secondsPlayed,
   benchGap,
   justPlayedIds,
   sortMode,
@@ -847,6 +861,7 @@ function ODAccordion({
   selected: string[];
   slotLabels: Record<string, string>;
   pointsPlayed: Record<string, number>;
+  secondsPlayed: Record<string, number>;
   benchGap: Record<string, number>;
   justPlayedIds: Set<string>;
   sortMode: SortMode;
@@ -888,6 +903,7 @@ function ODAccordion({
           selected={selected}
           slotLabels={slotLabels}
           pointsPlayed={pointsPlayed}
+          secondsPlayed={secondsPlayed}
           benchGap={benchGap}
           justPlayedIds={justPlayedIds}
           sortMode={sortMode}
@@ -913,13 +929,14 @@ function sortByRecency<T extends RosterSnapshotEntry>(
   });
 }
 
-/** Fewest total points played first; ties broken by name. */
-function sortByFewestPlayed<T extends RosterSnapshotEntry>(
+/** Fewest of some count/duration first (points played, seconds played, …);
+ *  ties broken by name. */
+function sortByFewest<T extends RosterSnapshotEntry>(
   players: T[],
-  pointsPlayed: Record<string, number>,
+  counts: Record<string, number>,
 ): T[] {
   return [...players].sort((a, b) => {
-    const diff = (pointsPlayed[a.playerId] ?? 0) - (pointsPlayed[b.playerId] ?? 0);
+    const diff = (counts[a.playerId] ?? 0) - (counts[b.playerId] ?? 0);
     if (diff !== 0) return diff;
     return displayName(a).localeCompare(displayName(b));
   });
@@ -930,6 +947,7 @@ function GenderColumns({
   selected,
   slotLabels,
   pointsPlayed,
+  secondsPlayed,
   benchGap,
   justPlayedIds,
   sortMode,
@@ -942,6 +960,7 @@ function GenderColumns({
   selected: string[];
   slotLabels: Record<string, string>;
   pointsPlayed: Record<string, number>;
+  secondsPlayed: Record<string, number>;
   benchGap: Record<string, number>;
   justPlayedIds: Set<string>;
   sortMode: SortMode;
@@ -954,8 +973,10 @@ function GenderColumns({
     sortMode === "recency"
       ? (list: RosterSnapshotEntry[]) => sortByRecency(list, benchGap)
       : sortMode === "playtime"
-        ? (list: RosterSnapshotEntry[]) => sortByFewestPlayed(list, pointsPlayed)
-        : sortRoster;
+        ? (list: RosterSnapshotEntry[]) => sortByFewest(list, pointsPlayed)
+        : sortMode === "minutes"
+          ? (list: RosterSnapshotEntry[]) => sortByFewest(list, secondsPlayed)
+          : sortRoster;
 
   // Single-division team (Open/Women): every player shares the same
   // genderMatch, so an MMP/WMP split is redundant — just two plain columns.
@@ -974,6 +995,7 @@ function GenderColumns({
           selected={selected}
           slotLabels={slotLabels}
           pointsPlayed={pointsPlayed}
+          secondsPlayed={secondsPlayed}
           benchGap={benchGap}
           justPlayedIds={justPlayedIds}
           columnFull={columnFull}
@@ -985,6 +1007,7 @@ function GenderColumns({
           selected={selected}
           slotLabels={slotLabels}
           pointsPlayed={pointsPlayed}
+          secondsPlayed={secondsPlayed}
           benchGap={benchGap}
           justPlayedIds={justPlayedIds}
           columnFull={columnFull}
@@ -1003,6 +1026,7 @@ function GenderColumns({
         selected={selected}
         slotLabels={slotLabels}
         pointsPlayed={pointsPlayed}
+        secondsPlayed={secondsPlayed}
         benchGap={benchGap}
         justPlayedIds={justPlayedIds}
         columnFull={mmpFull}
@@ -1015,6 +1039,7 @@ function GenderColumns({
         selected={selected}
         slotLabels={slotLabels}
         pointsPlayed={pointsPlayed}
+        secondsPlayed={secondsPlayed}
         benchGap={benchGap}
         justPlayedIds={justPlayedIds}
         columnFull={wmpFull}
@@ -1031,6 +1056,7 @@ function RosterColumn({
   selected,
   slotLabels,
   pointsPlayed,
+  secondsPlayed,
   benchGap,
   justPlayedIds,
   columnFull,
@@ -1043,6 +1069,7 @@ function RosterColumn({
   selected: string[];
   slotLabels: Record<string, string>;
   pointsPlayed: Record<string, number>;
+  secondsPlayed: Record<string, number>;
   benchGap: Record<string, number>;
   justPlayedIds: Set<string>;
   columnFull: boolean;
@@ -1098,8 +1125,9 @@ function RosterColumn({
                       : `Last played ${benchGap[p.playerId] ?? 0} points ago`}
                   </span>
                 </span>
-                <span className="shrink-0 text-xs text-faint">
-                  {pointsPlayed[p.playerId] ?? 0}
+                <span className="flex shrink-0 flex-col items-end text-[10px] text-faint">
+                  <span>{pointsPlayed[p.playerId] ?? 0} pts</span>
+                  <span>{Math.round((secondsPlayed[p.playerId] ?? 0) / 60)} min</span>
                 </span>
               </button>
             </li>
