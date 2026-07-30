@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import type { Division, Team } from "@shared/game-rules";
-import { createTeam, readTeams } from "@/lib/storage/teams";
+import { createTeam, deleteTeam, readTeams } from "@/lib/storage/teams";
 import { updateMyProfile } from "@/lib/storage/me";
 import { sameById, useCachedFetch } from "@/lib/cache";
 import { keys } from "@/lib/storage/keys";
@@ -24,6 +24,7 @@ export function TeamsList() {
   const [division, setDivision] = useState<Division>("mixed");
   const [error, setError] = useState<string | null>(null);
   const [editingName, setEditingName] = useState(false);
+  const [deleting, setDeleting] = useState<Team | null>(null);
 
   const add = async () => {
     if (!name.trim()) return;
@@ -35,6 +36,19 @@ export function TeamsList() {
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
+  };
+
+  const confirmDelete = () => {
+    if (!deleting) return;
+    deleteTeam(deleting.id)
+      .then(() => {
+        setDeleting(null);
+        return refresh();
+      })
+      .catch((err) => {
+        setDeleting(null);
+        setError(err instanceof Error ? err.message : String(err));
+      });
   };
 
   if (teams === null) {
@@ -83,12 +97,22 @@ export function TeamsList() {
                   {t.division}
                 </span>
               </div>
-              <Link
-                href={`/teams/${t.id}`}
-                className="rounded-md border border-line-strong px-3 py-1.5 text-sm font-medium text-emerald-700 hover:bg-surface-2 dark:text-emerald-400"
-              >
-                View team →
-              </Link>
+              <div className="flex shrink-0 items-center gap-2">
+                <Link
+                  href={`/teams/${t.id}`}
+                  className="rounded-md border border-line-strong px-3 py-1.5 text-sm font-medium text-emerald-700 hover:bg-surface-2 dark:text-emerald-400"
+                >
+                  View team →
+                </Link>
+                <button
+                  onClick={() => setDeleting(t)}
+                  aria-label={`Delete ${t.name}`}
+                  title="Delete team"
+                  className="rounded-md border border-line-strong p-1.5 text-faint hover:text-red-600 dark:hover:text-red-400"
+                >
+                  <TrashIcon />
+                </button>
+              </div>
             </li>
           ))}
         </ul>
@@ -136,6 +160,30 @@ export function TeamsList() {
             setEditingName(false);
           }}
         />
+      )}
+
+      {deleting && (
+        <Modal onClose={() => setDeleting(null)}>
+          <h2 className="font-medium">Delete {deleting.name}?</h2>
+          <p className="text-sm text-muted">
+            This removes {deleting.name} from your teams list. If you need it
+            back later, just ask — nothing is actually erased.
+          </p>
+          <div className="flex justify-end gap-2 pt-1">
+            <button
+              onClick={() => setDeleting(null)}
+              className="rounded-md border border-line-strong px-3 py-1.5 text-sm"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={confirmDelete}
+              className="rounded bg-red-600 px-3 py-1.5 text-sm font-medium text-white"
+            >
+              Delete
+            </button>
+          </div>
+        </Modal>
       )}
     </section>
   );
@@ -221,6 +269,26 @@ function EditIcon() {
     >
       <path
         d="M13.5 3.5l3 3L7 16l-4 1 1-4 9.5-9.5z"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+// Small trash icon — no icon library dependency, just an inline SVG.
+function TrashIcon() {
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      className="h-3.5 w-3.5"
+      aria-hidden
+    >
+      <path
+        d="M4 6h12M8 6V4.5A1.5 1.5 0 0 1 9.5 3h1A1.5 1.5 0 0 1 12 4.5V6m2 0v9a1.5 1.5 0 0 1-1.5 1.5h-5A1.5 1.5 0 0 1 6 15V6h8Z"
         strokeLinecap="round"
         strokeLinejoin="round"
       />

@@ -6,7 +6,7 @@
 // wrote, for display on the team/tournament game lists — it never feeds back
 // into a mutation or decides anything about the game's own state.
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import {
   deriveLiveGameState,
   playerPointOutcomes,
@@ -57,12 +57,15 @@ export async function listTeamsForManager(phone: string): Promise<Team[]> {
     .select({ team: teams })
     .from(teamManagers)
     .innerJoin(teams, eq(teamManagers.teamId, teams.id))
-    .where(eq(teamManagers.phone, phone));
+    .where(and(eq(teamManagers.phone, phone), isNull(teams.deletedAt)));
   return rows.map((r) => toTeam(r.team));
 }
 
 export async function getTeam(id: string): Promise<Team | null> {
-  const [row] = await db.select().from(teams).where(eq(teams.id, id));
+  const [row] = await db
+    .select()
+    .from(teams)
+    .where(and(eq(teams.id, id), isNull(teams.deletedAt)));
   return row ? toTeam(row) : null;
 }
 
@@ -78,8 +81,11 @@ export async function createTeam(input: {
   return toTeam(row!);
 }
 
+/** Soft delete: hides the team (see the isNull(deletedAt) filters above)
+ *  without touching its row or any child data — restorable later by clearing
+ *  deletedAt directly, if ever asked. */
 export async function deleteTeam(id: string): Promise<void> {
-  await db.delete(teams).where(eq(teams.id, id));
+  await db.update(teams).set({ deletedAt: new Date() }).where(eq(teams.id, id));
 }
 
 function toTeam(row: typeof teams.$inferSelect): Team {

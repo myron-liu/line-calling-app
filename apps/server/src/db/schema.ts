@@ -25,6 +25,11 @@ export const teams = pgTable("teams", {
   name: text("name").notNull(),
   division: text("division").notNull(), // "mixed" | "open" | "women"
   createdAt: createdAt(),
+  // Soft delete: "deleting" a team from the UI just hides it (see
+  // listTeamsForManager/getTeam filtering it out) rather than removing any
+  // row — the team and all its child data (players, tournaments, games,
+  // saved lines) stay intact and restorable via a one-off script if asked.
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
 });
 
 // Many-to-many: a phone number (the verified identity from a Supabase phone-

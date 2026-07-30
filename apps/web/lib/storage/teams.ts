@@ -30,6 +30,12 @@ export function createTeam(name: string, division: Division): Promise<Team> {
   return api.post<Team>("/teams", { name, division });
 }
 
+/** Soft delete server-side — the team just stops showing up; nothing about
+ *  it is actually destroyed (see apps/server/src/db/queries.ts's deleteTeam). */
+export function deleteTeam(teamId: string): Promise<void> {
+  return api.delete(`/teams/${teamId}`);
+}
+
 // ── Players (the team roster) ────────────────────────────────────────────────────
 
 export function readPlayers(teamId: string): Promise<Player[]> {
