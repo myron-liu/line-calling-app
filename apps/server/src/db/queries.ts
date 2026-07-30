@@ -1110,6 +1110,8 @@ export async function syncGame(
         substitutions: p.substitutions as Substitution[] | undefined,
         result: p.result,
         isFirstAfterHalftime: p.isFirstAfterHalftime,
+        startedAt: p.startedAt ? new Date(p.startedAt) : undefined,
+        endedAt: p.endedAt ? new Date(p.endedAt) : undefined,
       })),
     );
   }
@@ -1212,5 +1214,7 @@ function toPoint(row: typeof points.$inferSelect): Point {
     substitutions: row.substitutions ?? undefined,
     result: (row.result as Point["result"]) ?? undefined,
     isFirstAfterHalftime: row.isFirstAfterHalftime,
+    startedAt: row.startedAt?.toISOString(),
+    endedAt: row.endedAt?.toISOString(),
   };
 }

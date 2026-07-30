@@ -7,6 +7,7 @@ import {
   ratioCounts,
   ratioForPoint,
   suggestedSituationTag,
+  totalPlayedSeconds,
   validateLine,
   type GenderRatio,
   type OD,
@@ -24,6 +25,28 @@ import {
   roleTag,
   sortRoster,
 } from "@/lib/player-display";
+
+// ── Game clock (§8) ──────────────────────────────────────────────────────────
+
+/** Re-renders every second while `active`, so a component reading Date.now()
+ *  ticks live; otherwise renders once and never re-fires the interval — no
+ *  point re-rendering a clock that isn't running (e.g. between points). */
+function useTicker(active: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [active]);
+  return now;
+}
+
+function formatClock(totalSeconds: number): string {
+  const s = Math.max(0, Math.round(totalSeconds));
+  const m = Math.floor(s / 60);
+  const sec = s % 60;
+  return `${m}:${sec.toString().padStart(2, "0")}`;
+}
 
 // The live line caller (§8). Drives the engine hook; only reads/writes localStorage.
 export function LiveCaller({ live }: { live: LiveGame }) {
@@ -67,9 +90,18 @@ export function LiveCaller({ live }: { live: LiveGame }) {
 // ── Header ─────────────────────────────────────────────────────────────────────
 
 function Header({ live }: { live: LiveGame }) {
-  const { state, game } = live;
+  const { state, game, points } = live;
   const odColor = state.od === "O" ? "bg-red-600" : "bg-blue-600";
   const fieldSide = fieldSideLabel(live);
+  // Cumulative game clock: completed points' recorded durations, plus the
+  // current point's still-ticking elapsed time if one's in progress (see
+  // PointClock in InProgressControls for the same point's own stopwatch).
+  const now = useTicker(state.phase === "point_in_progress");
+  const inProgressStartedAt = points.find((p) => p.result === undefined)?.startedAt;
+  const liveElapsed = inProgressStartedAt
+    ? (now - new Date(inProgressStartedAt).getTime()) / 1000
+    : 0;
+  const totalPlayed = totalPlayedSeconds(points) + liveElapsed;
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
@@ -93,6 +125,7 @@ function Header({ live }: { live: LiveGame }) {
         <span className="text-muted">
           TO {state.ourTimeoutsRemaining}·{state.theirTimeoutsRemaining}
         </span>
+        <span className="text-muted">Time played {formatClock(totalPlayed)}</span>
       </div>
       {fieldSide && <p className="text-xs text-muted">{fieldSide}</p>}
       {game.startingGenderRatio && (
@@ -1366,7 +1399,7 @@ function InProgressControls({
   live: LiveGame;
   onNextLineDraftChange: (ids: string[]) => void;
 }) {
-  const { game, roster, state, actions } = live;
+  const { game, roster, state, points, actions } = live;
   const nextPointNumber = state.currentPointNumber + 1;
   const nextGenderRatio = game.startingGenderRatio
     ? ratioForPoint(nextPointNumber, game.startingGenderRatio)
@@ -1374,9 +1407,12 @@ function InProgressControls({
   const currentLine = sortRoster(
     roster.filter((p) => state.currentLineup.includes(p.playerId)),
   );
+  const pointStartedAt = points.find((p) => p.result === undefined)?.startedAt;
 
   return (
     <div className="space-y-4">
+      <PointClock startedAt={pointStartedAt} />
+
       <div className="grid grid-cols-2 gap-3">
         <ScoreButton label="We scored ▸" onClick={() => actions.recordResult("us")} tone="emerald" />
         <ScoreButton label="They scored ▸" onClick={() => actions.recordResult("them")} tone="neutral" />
@@ -1403,6 +1439,22 @@ function InProgressControls({
           onSelectionChange={onNextLineDraftChange}
         />
       </div>
+    </div>
+  );
+}
+
+// This point's own stopwatch: starts ticking the moment the line was
+// confirmed (Point.startedAt), stops for good once the result is recorded —
+// at that point this component unmounts along with the rest of
+// InProgressControls, so there's nothing to freeze explicitly.
+function PointClock({ startedAt }: { startedAt?: string }) {
+  const now = useTicker(!!startedAt);
+  if (!startedAt) return null;
+  const elapsed = (now - new Date(startedAt).getTime()) / 1000;
+  return (
+    <div className="rounded-lg border border-line bg-surface-2 py-3 text-center">
+      <p className="text-3xl font-bold tabular-nums">{formatClock(elapsed)}</p>
+      <p className="text-xs uppercase tracking-wide text-faint">Point clock</p>
     </div>
   );
 }

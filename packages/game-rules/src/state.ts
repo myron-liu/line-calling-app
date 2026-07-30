@@ -171,12 +171,15 @@ export function deriveLiveGameState(
 // ── Transitions (pure reducers) ──────────────────────────────────────────────
 
 /** Confirm the line for the upcoming point → point_in_progress. `pointId` is
- *  caller-supplied (game-rules stays pure/id-free). */
+ *  caller-supplied (game-rules stays pure/id-free); so is `startedAt` (the
+ *  game clock's start — every transition here is a pure function of its
+ *  arguments, so the caller reads the wall clock, not this module). */
 export function confirmLine(
   game: GameRules,
   state: GameLogState,
   lineup: string[],
   pointId: string,
+  startedAt?: string,
 ): GameLogState {
   if (state.meta.endedManually) throw new Error("Game has ended");
   if (state.points.some((p) => p.result === undefined)) {
@@ -192,6 +195,7 @@ export function confirmLine(
     lineup: [...lineup],
     isFirstAfterHalftime: ctx.isFirstAfterHalftime,
     result: undefined,
+    startedAt,
   };
   return { points: [...state.points, point], meta: state.meta };
 }
@@ -206,12 +210,13 @@ export function recordResult(
   game: GameRules,
   state: GameLogState,
   scorer: PointResult,
+  endedAt?: string,
 ): GameLogState {
   const idx = state.points.findIndex((p) => p.result === undefined);
   if (idx === -1) throw new Error("No point in progress");
 
   const points = state.points.map((p, i) =>
-    i === idx ? { ...p, result: scorer } : p,
+    i === idx ? { ...p, result: scorer, endedAt } : p,
   );
 
   let meta = state.meta;
@@ -320,8 +325,8 @@ export function editPointLineup(
 /** How to reverse a one-step undo — replaying the exact reducer call it
  *  reverted, so redo() can just re-dispatch it instead of duplicating logic. */
 export type RedoAction =
-  | { type: "confirmLine"; lineup: string[]; pointId: string }
-  | { type: "recordResult"; scorer: PointResult }
+  | { type: "confirmLine"; lineup: string[]; pointId: string; startedAt?: string }
+  | { type: "recordResult"; scorer: PointResult; endedAt?: string }
   | { type: "endGame" }
   | { type: "callHalftime" };
 
@@ -383,12 +388,18 @@ export function undoLastPoint(
       points: state.points.slice(0, -1),
       meta: state.meta,
       restoredLineup: last.lineup,
-      redo: { type: "confirmLine", lineup: last.lineup, pointId: last.id },
+      redo: {
+        type: "confirmLine",
+        lineup: last.lineup,
+        pointId: last.id,
+        startedAt: last.startedAt,
+      },
     };
   }
 
+  const lastEndedAt = last.endedAt;
   const points = state.points.map((p, i) =>
-    i === state.points.length - 1 ? { ...p, result: undefined } : p,
+    i === state.points.length - 1 ? { ...p, result: undefined, endedAt: undefined } : p,
   );
   const wasHalftime = state.meta.halftimeReached;
   const nowHalftime = deriveHalftimeReached(game, points);
@@ -402,12 +413,13 @@ export function undoLastPoint(
     points,
     meta,
     restoredLineup: null,
-    redo: { type: "recordResult", scorer: last.result },
+    redo: { type: "recordResult", scorer: last.result, endedAt: lastEndedAt },
   };
 }
 
 /** Reapply a RedoAction captured from undoLastPoint's result, by re-dispatching
- *  the exact reducer call it reverted — so redo can never drift from undo. */
+ *  the exact reducer call it reverted — so redo can never drift from undo,
+ *  and the original startedAt/endedAt (not a fresh "now") is restored too. */
 export function redoAction(
   game: GameRules,
   state: GameLogState,
@@ -415,9 +427,9 @@ export function redoAction(
 ): GameLogState {
   switch (action.type) {
     case "confirmLine":
-      return confirmLine(game, state, action.lineup, action.pointId);
+      return confirmLine(game, state, action.lineup, action.pointId, action.startedAt);
     case "recordResult":
-      return recordResult(game, state, action.scorer);
+      return recordResult(game, state, action.scorer, action.endedAt);
     case "endGame":
       return endGame(state);
     case "callHalftime":

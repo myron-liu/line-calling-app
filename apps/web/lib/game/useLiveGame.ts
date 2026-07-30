@@ -488,7 +488,10 @@ export function useLiveGame(gameId: string): LiveGameResult {
         run(() => {
           if (!game || !log) return;
           const pointId = newId();
-          commit(confirmLine(game, log, lineup, pointId), "confirmLine", {
+          // The game clock for this point starts now (see confirmLine's
+          // startedAt in state.ts) — stopped by recordResult below.
+          const startedAt = new Date().toISOString();
+          commit(confirmLine(game, log, lineup, pointId, startedAt), "confirmLine", {
             pointId,
             lineup,
           });
@@ -497,7 +500,8 @@ export function useLiveGame(gameId: string): LiveGameResult {
       recordResult: (scorer: PointResult) =>
         run(() => {
           if (!game || !log) return;
-          commit(recordResult(game, log, scorer), "recordResult", { scorer });
+          const endedAt = new Date().toISOString();
+          commit(recordResult(game, log, scorer, endedAt), "recordResult", { scorer });
         }),
       callHalftime: () =>
         run(() => {

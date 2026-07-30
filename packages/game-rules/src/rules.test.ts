@@ -12,6 +12,7 @@ import {
   teamPointOutcomes,
   playerPointOutcomes,
   suggestedSituationTag,
+  totalPlayedSeconds,
 } from "./rules";
 import { validateLine, lineWarnings, type LinePlayer } from "./validation";
 import type { GenderRatio, Point } from "./types";
@@ -248,6 +249,41 @@ describe("halfScoreForCap (§4.2)", () => {
   test("13 -> 7, 15 -> 8", () => {
     expect(halfScoreForCap(13)).toBe(7);
     expect(halfScoreForCap(15)).toBe(8);
+  });
+});
+
+describe("totalPlayedSeconds (game clock)", () => {
+  const mk = (startedAt?: string, endedAt?: string, result?: "us" | "them"): Point => ({
+    id: "p",
+    gameId: "g",
+    pointNumber: 1,
+    od: "O",
+    lineup: [],
+    result,
+    isFirstAfterHalftime: false,
+    startedAt,
+    endedAt,
+  });
+
+  test("sums duration across points with both timestamps", () => {
+    const points = [
+      mk("2024-01-01T00:00:00.000Z", "2024-01-01T00:01:30.000Z", "us"),
+      mk("2024-01-01T00:02:00.000Z", "2024-01-01T00:02:45.000Z", "them"),
+    ];
+    expect(totalPlayedSeconds(points)).toBe(90 + 45);
+  });
+
+  test("ignores points missing either timestamp (legacy or in-progress)", () => {
+    const points = [
+      mk("2024-01-01T00:00:00.000Z", "2024-01-01T00:01:00.000Z", "us"),
+      mk("2024-01-01T00:02:00.000Z", undefined, undefined), // in progress
+      mk(undefined, undefined, "them"), // legacy point, no timestamps at all
+    ];
+    expect(totalPlayedSeconds(points)).toBe(60);
+  });
+
+  test("empty log -> 0", () => {
+    expect(totalPlayedSeconds([])).toBe(0);
   });
 });
 

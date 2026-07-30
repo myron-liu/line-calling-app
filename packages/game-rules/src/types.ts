@@ -217,6 +217,14 @@ export interface Point {
   /** Who scored; undefined while the point is in progress. */
   result?: PointResult;
   isFirstAfterHalftime: boolean;
+  /** ISO timestamp when the line was confirmed — the game clock for this
+   *  point starts here (see confirmLine in state.ts). Undefined for points
+   *  synced before this field existed. */
+  startedAt?: string;
+  /** ISO timestamp when the result was recorded — the game clock stops
+   *  here. Undefined while the point is still in progress, or for points
+   *  synced before this field existed. */
+  endedAt?: string;
 }
 
 /**

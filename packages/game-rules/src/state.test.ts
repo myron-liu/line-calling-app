@@ -255,6 +255,35 @@ describe("undo (one step, phase-aware)", () => {
   });
 });
 
+describe("game clock (startedAt/endedAt)", () => {
+  test("confirmLine stamps startedAt, recordResult stamps endedAt", () => {
+    const withLine = confirmLine(game, fresh(), line(1), "pt-1", "2026-07-01T00:00:00Z");
+    expect(withLine.points[0]!.startedAt).toBe("2026-07-01T00:00:00Z");
+    expect(withLine.points[0]!.endedAt).toBeUndefined();
+
+    const decided = recordResult(game, withLine, "us", "2026-07-01T00:01:30Z");
+    expect(decided.points[0]!.startedAt).toBe("2026-07-01T00:00:00Z");
+    expect(decided.points[0]!.endedAt).toBe("2026-07-01T00:01:30Z");
+  });
+
+  test("undoing a result clears endedAt (point is in progress again)", () => {
+    const withLine = confirmLine(game, fresh(), line(1), "pt-1", "2026-07-01T00:00:00Z");
+    const decided = recordResult(game, withLine, "us", "2026-07-01T00:01:30Z");
+    const undone = undoLastPoint(game, decided);
+    expect(undone.points[0]!.endedAt).toBeUndefined();
+    expect(undone.points[0]!.startedAt).toBe("2026-07-01T00:00:00Z");
+  });
+
+  test("redo restores the original timestamps, not a fresh one", () => {
+    const withLine = confirmLine(game, fresh(), line(1), "pt-1", "2026-07-01T00:00:00Z");
+    const decided = recordResult(game, withLine, "us", "2026-07-01T00:01:30Z");
+    const undone = undoLastPoint(game, decided);
+    const redone = redoAction(game, undone, undone.redo);
+    expect(redone.points[0]!.startedAt).toBe("2026-07-01T00:00:00Z");
+    expect(redone.points[0]!.endedAt).toBe("2026-07-01T00:01:30Z");
+  });
+});
+
 describe("game completion", () => {
   test("reaching cap completes the game", () => {
     let s = fresh();

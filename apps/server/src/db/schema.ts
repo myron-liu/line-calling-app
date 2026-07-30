@@ -223,6 +223,11 @@ export const points = pgTable(
     isFirstAfterHalftime: boolean("is_first_after_halftime")
       .notNull()
       .default(false),
+    // Game clock (§8): startedAt is set when the line is confirmed, endedAt
+    // when the result is recorded. Null for points synced before this
+    // existed, or (startedAt only) while a point is still in progress.
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    endedAt: timestamp("ended_at", { withTimezone: true }),
   },
   (t) => [uniqueIndex("points_game_point_unique").on(t.gameId, t.pointNumber)],
 );

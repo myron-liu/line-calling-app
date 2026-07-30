@@ -184,6 +184,27 @@ export function halfScoreForCap(cap: GameCapMode): number | null {
   return cap === null ? null : cap === 13 ? 7 : 8;
 }
 
+// ── Game clock — §8 ──────────────────────────────────────────────────────────
+
+/**
+ * Sum of each completed point's clock duration (confirm → record), in
+ * seconds — only counts points carrying both timestamps, so points synced
+ * from before this field existed just don't contribute rather than throwing.
+ * Doesn't include the current in-progress point's still-ticking time; the
+ * live caller adds that separately from its own startedAt (see live-caller.tsx).
+ * Parses already-recorded ISO strings rather than reading the wall clock
+ * itself, so this stays a pure function of its input like the rest of this file.
+ */
+export function totalPlayedSeconds(points: Point[]): number {
+  let total = 0;
+  for (const p of points) {
+    if (p.startedAt && p.endedAt) {
+      total += (new Date(p.endedAt).getTime() - new Date(p.startedAt).getTime()) / 1000;
+    }
+  }
+  return total;
+}
+
 // ── Situational tag suggestion (quick-lines default filter) ─────────────────
 
 /**
