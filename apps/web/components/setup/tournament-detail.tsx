@@ -228,6 +228,12 @@ export function TournamentDetail({ tournamentId }: { tournamentId: string }) {
             >
               Lines &amp; pods →
             </Link>
+            <Link
+              href={`/tournaments/${tournamentId}/tags`}
+              className="text-sm font-medium text-emerald-700 dark:text-emerald-400"
+            >
+              Tags →
+            </Link>
           </div>
         </div>
         <GameList

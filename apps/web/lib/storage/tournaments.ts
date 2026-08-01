@@ -9,7 +9,13 @@
 // Checking players in/out still cascades to every game under the tournament —
 // the server does that once per flush (see queries.ts's syncTournamentGameRosters).
 
-import type { Division, GenderMatch, Role, Tournament } from "@shared/game-rules";
+import type {
+  Division,
+  GenderMatch,
+  Role,
+  Tournament,
+  TournamentPlayerTags,
+} from "@shared/game-rules";
 import { api } from "../api/client";
 import { keys } from "./keys";
 import { read, write } from "./store";
@@ -100,6 +106,29 @@ export function syncTournamentRoster(
   changes: Array<{ playerId: string } & PendingRosterChange>,
 ): Promise<TournamentRosterEntry[]> {
   return api.put<TournamentRosterEntry[]>(`/tournaments/${tournamentId}/roster`, {
+    changes,
+  });
+}
+
+// ── Player tags (tournament-scoped) ─────────────────────────────────────────
+// See TournamentPlayerTags — a coach reuses the same roster differently
+// across tournaments, so tags live here rather than on Player itself.
+
+export function readTournamentPlayerTags(
+  tournamentId: string,
+): Promise<TournamentPlayerTags[]> {
+  return api.get<TournamentPlayerTags[]>(`/tournaments/${tournamentId}/player-tags`);
+}
+
+/** The client debounces rapid toggles locally and flushes once after a short
+ *  idle period (see player-tags-editor.tsx) rather than one request per tap.
+ *  The server applies the batch, re-syncs every game under the tournament,
+ *  and returns the resulting tags — the caller should just adopt that. */
+export function syncTournamentPlayerTags(
+  tournamentId: string,
+  changes: Array<{ playerId: string; tags: string[] }>,
+): Promise<TournamentPlayerTags[]> {
+  return api.put<TournamentPlayerTags[]>(`/tournaments/${tournamentId}/player-tags`, {
     changes,
   });
 }

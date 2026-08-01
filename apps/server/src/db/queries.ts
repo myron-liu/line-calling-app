@@ -43,6 +43,7 @@ import {
   savedLines,
   teamManagers,
   teams,
+  tournamentPlayerTags,
   tournamentRoster,
   tournaments,
   users,
@@ -199,7 +200,6 @@ export interface PlayerInput {
   role: Role;
   odPreference?: ODPreference;
   jerseyNumber?: number;
-  tags?: string[];
 }
 
 export async function listPlayers(teamId: string): Promise<Player[]> {
@@ -234,7 +234,6 @@ export async function createPlayer(
       role: input.role,
       odPreference: input.odPreference,
       jerseyNumber: input.jerseyNumber,
-      tags: input.tags ?? [],
     })
     .returning();
   return toPlayer(row!);
@@ -295,7 +294,6 @@ function toPlayer(row: typeof players.$inferSelect): Player {
     role: row.role as Role,
     odPreference: (row.odPreference as ODPreference) ?? undefined,
     jerseyNumber: row.jerseyNumber ?? undefined,
-    tags: row.tags,
     createdAt: row.createdAt.toISOString(),
   };
 }
@@ -418,6 +416,56 @@ export async function batchUpdateTournamentRoster(
   }
 }
 
+// ── Tournament-scoped player tags ────────────────────────────────────────────
+// Deliberately a separate table from tournamentRoster — see the schema
+// comment on tournamentPlayerTags for why (that table's rows get deleted
+// outright on an absent check-in, which would silently destroy tags too).
+
+export interface TournamentPlayerTagsEntry {
+  playerId: string;
+  tags: string[];
+}
+
+export async function listTournamentPlayerTags(
+  tournamentId: string,
+): Promise<TournamentPlayerTagsEntry[]> {
+  const rows = await db
+    .select()
+    .from(tournamentPlayerTags)
+    .where(eq(tournamentPlayerTags.tournamentId, tournamentId));
+  return rows.map((r) => ({ playerId: r.playerId, tags: r.tags }));
+}
+
+export interface TournamentPlayerTagsChange {
+  playerId: string;
+  tags: string[];
+}
+
+/** Same batched-upsert shape as batchUpdateTournamentRoster — the client
+ *  debounces rapid taps locally and flushes once after a short idle period
+ *  instead of one request per toggle (see player-tags-editor.tsx). Unlike
+ *  the check-in roster, an empty tags array is still worth persisting (it
+ *  means "explicitly cleared"), so this never deletes the row. */
+export async function batchUpdateTournamentPlayerTags(
+  tournamentId: string,
+  changes: TournamentPlayerTagsChange[],
+): Promise<void> {
+  for (const c of changes) {
+    await db
+      .insert(tournamentPlayerTags)
+      .values({
+        id: `${tournamentId}:${c.playerId}`,
+        tournamentId,
+        playerId: c.playerId,
+        tags: c.tags,
+      })
+      .onConflictDoUpdate({
+        target: [tournamentPlayerTags.tournamentId, tournamentPlayerTags.playerId],
+        set: { tags: c.tags },
+      });
+  }
+}
+
 /**
  * Mirrors apps/web/lib/storage/games.ts's syncTournamentGameRosters: push the
  * current check-in roster onto every game under this tournament. Existing
@@ -428,14 +476,16 @@ export async function syncTournamentGameRosters(
   teamId: string,
   tournamentId: string,
 ): Promise<void> {
-  const [teamPlayers, roster, tournamentGames] = await Promise.all([
+  const [teamPlayers, roster, tournamentGames, playerTags] = await Promise.all([
     listPlayers(teamId),
     listTournamentRoster(tournamentId),
     db.select().from(games).where(eq(games.tournamentId, tournamentId)),
+    listTournamentPlayerTags(tournamentId),
   ]);
   const playerById = new Map(teamPlayers.map((p) => [p.id, p]));
   const presentIds = new Set(roster.map((r) => r.playerId));
   const injuredByPlayerId = new Map(roster.map((r) => [r.playerId, r.injured]));
+  const tagsByPlayerId = new Map(playerTags.map((t) => [t.playerId, t.tags]));
 
   for (const game of tournamentGames) {
     const existing = await db
@@ -459,7 +509,7 @@ export async function syncTournamentGameRosters(
                 role: player.role,
                 odPreference: player.odPreference,
                 jerseyNumber: player.jerseyNumber,
-                tags: player.tags ?? [],
+                tags: tagsByPlayerId.get(entry.playerId) ?? [],
               }
             : { active },
         )
@@ -482,7 +532,7 @@ export async function syncTournamentGameRosters(
         jerseyNumber: p.jerseyNumber,
         injured: injuredByPlayerId.get(p.id) ?? false,
         active: true,
-        tags: p.tags ?? [],
+        tags: tagsByPlayerId.get(p.id) ?? [],
       });
     }
   }
@@ -755,9 +805,23 @@ export async function createGame(input: CreateGameInput): Promise<GameFull> {
     })
     .returning();
 
-  if (input.roster.length > 0) {
+  // Tags are tournament-scoped (see tournamentPlayerTags) — sourced here
+  // rather than trusted from the client-supplied roster, since a player no
+  // longer carries tags of their own at all.
+  const tagsByPlayerId = input.tournamentId
+    ? new Map(
+        (await listTournamentPlayerTags(input.tournamentId)).map((t) => [t.playerId, t.tags]),
+      )
+    : new Map<string, string[]>();
+
+  const roster = input.roster.map((p) => ({
+    ...p,
+    tags: tagsByPlayerId.get(p.playerId) ?? [],
+  }));
+
+  if (roster.length > 0) {
     await db.insert(gameRoster).values(
-      input.roster.map((p) => ({
+      roster.map((p) => ({
         id: `${input.id}:${p.playerId}`,
         gameId: input.id,
         playerId: p.playerId,
@@ -769,7 +833,7 @@ export async function createGame(input: CreateGameInput): Promise<GameFull> {
         jerseyNumber: p.jerseyNumber,
         injured: p.injured,
         active: p.active ?? true,
-        tags: p.tags ?? [],
+        tags: p.tags,
       })),
     );
   }
@@ -777,7 +841,7 @@ export async function createGame(input: CreateGameInput): Promise<GameFull> {
   return {
     game: toGame(row!),
     meta: toMeta(row!),
-    roster: input.roster,
+    roster,
     points: [],
   };
 }

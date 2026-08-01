@@ -71,12 +71,6 @@ export interface Player {
   /** Preferred side of the disc; defaults to "both" when unset. */
   odPreference?: ODPreference;
   jerseyNumber?: number;
-  /** Free-form coach-assigned labels, distinct from `role` (e.g. "Zone D
-   *  specialist", "Rookie") — a player can have several. No separate managed
-   *  list: a tag exists as long as some player carries it, and the UI offers
-   *  already-used tags so a coach can reapply one instead of retyping it
-   *  (same pattern as SavedLine.tags). Filterable in the live caller. */
-  tags?: string[];
   createdAt: string;
 }
 
@@ -100,6 +94,20 @@ export interface TournamentRoster {
   /** Locks the player out of new lines; tournament-scoped, toggleable. */
   injured: boolean;
   createdAt: string;
+}
+
+/**
+ * Free-form coach-assigned labels for a player, scoped to one tournament
+ * (a team often reuses the same roster differently across tournaments) — see
+ * player-tags-editor.tsx. Deliberately not a field on TournamentRoster: that
+ * row is deleted outright when a player is marked not-present at check-in,
+ * which would silently destroy any tags stored there too, so this is its own
+ * table (apps/server's tournamentPlayerTags) with independent lifetime. No
+ * separate managed list: a tag exists as long as some player carries it.
+ */
+export interface TournamentPlayerTags {
+  playerId: string;
+  tags: string[];
 }
 
 /** Coach-assigned color for a saved line/pod chip in the quick-lines bar. */

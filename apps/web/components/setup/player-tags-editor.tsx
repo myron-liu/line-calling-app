@@ -1,55 +1,110 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import type { Player, Team } from "@shared/game-rules";
-import { readPlayers, readTeam, updatePlayer } from "@/lib/storage/teams";
+import type { Player, Tournament } from "@shared/game-rules";
+import { readPlayers } from "@/lib/storage/teams";
+import {
+  findTournament,
+  readTournamentPlayerTags,
+  syncTournamentPlayerTags,
+} from "@/lib/storage/tournaments";
 import { sortRoster } from "@/lib/player-display";
 import { Modal } from "@/components/modal";
 import { COLUMN_TONE, PlayerColumn } from "./lines-editor";
 
+// How long to wait after the coach's last tap before flushing to the server —
+// long enough that a quick run through several players collapses into one
+// request, short enough that it still reads as "autosave", not "save button".
+const AUTOSAVE_DELAY_MS = 900;
+
 // Quick player tagging, mirroring the lines/pods editor's shape: pick or
 // create a tag, then toggle roster membership straight from a roster grid —
-// no per-player modal round-trip. Player.tags is team-wide (unlike saved
-// lines, which are tournament-scoped), so this reads/writes the whole
-// team's roster directly.
-export function PlayerTagsEditor({ teamId }: { teamId: string }) {
-  const [team, setTeam] = useState<Team | null | undefined>(undefined);
+// no per-player modal round-trip. Tags are tournament-scoped (§
+// TournamentPlayerTags) — a team often reuses the same roster differently
+// across tournaments — so this reads/writes that tournament's tags, not the
+// player record itself.
+export function PlayerTagsEditor({ tournamentId }: { tournamentId: string }) {
+  const [tournament, setTournament] = useState<Tournament | null | undefined>(undefined);
   const [players, setPlayers] = useState<Player[]>([]);
+  // The locally-authoritative tag membership: seeded from the server, then
+  // mutated immediately as the coach toggles (for instant feedback), with
+  // changes flushed to the server after AUTOSAVE_DELAY_MS of inactivity
+  // rather than one request per tap (see scheduleSync).
+  const [tagsByPlayerId, setTagsByPlayerId] = useState<Record<string, string[]>>({});
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [newTagInput, setNewTagInput] = useState("");
   const [deletingTag, setDeletingTag] = useState<string | null>(null);
-  const [busyId, setBusyId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    readTeam(teamId).then((t) => {
-      setTeam(t);
-      if (t) readPlayers(teamId).then(setPlayers);
-    });
-  }, [teamId]);
+  const pendingRef = useRef<Map<string, string[]>>(new Map());
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const refresh = () => readPlayers(teamId).then(setPlayers);
+  useEffect(() => {
+    findTournament(tournamentId).then((t) => {
+      setTournament(t);
+      if (!t) return;
+      Promise.all([readPlayers(t.teamId), readTournamentPlayerTags(tournamentId)]).then(
+        ([ps, tags]) => {
+          setPlayers(ps);
+          const map: Record<string, string[]> = {};
+          for (const entry of tags) map[entry.playerId] = entry.tags;
+          setTagsByPlayerId(map);
+        },
+      );
+    });
+  }, [tournamentId]);
+
+  const flush = () => {
+    if (pendingRef.current.size === 0) return;
+    const changes = [...pendingRef.current.entries()].map(([playerId, tags]) => ({
+      playerId,
+      tags,
+    }));
+    pendingRef.current = new Map();
+    setSaving(true);
+    syncTournamentPlayerTags(tournamentId, changes)
+      .then(() => setError(null))
+      .catch((err) => setError(err instanceof Error ? err.message : String(err)))
+      .finally(() => setSaving(false));
+  };
+
+  // Flush on unmount too, so a tap right before navigating away isn't lost
+  // to the debounce timer never getting to fire.
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+      flush();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const scheduleSync = (playerId: string, tags: string[]) => {
+    pendingRef.current.set(playerId, tags);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(flush, AUTOSAVE_DELAY_MS);
+  };
 
   // Every tag currently in use, with how many players carry it — the tag
   // itself has no separate record, it just exists as long as someone has it.
   const tagCounts = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const p of players) {
-      for (const t of p.tags ?? []) counts.set(t, (counts.get(t) ?? 0) + 1);
+    for (const tags of Object.values(tagsByPlayerId)) {
+      for (const t of tags) counts.set(t, (counts.get(t) ?? 0) + 1);
     }
     return counts;
-  }, [players]);
+  }, [tagsByPlayerId]);
   const allTags = useMemo(
     () => [...tagCounts.keys()].sort((a, b) => a.localeCompare(b)),
     [tagCounts],
   );
 
-  if (team === undefined) return <p className="text-muted">Loading…</p>;
-  if (team === null) {
+  if (tournament === undefined) return <p className="text-muted">Loading…</p>;
+  if (tournament === null) {
     return (
       <div className="space-y-3 py-8 text-center">
-        <p className="text-muted">Team not found.</p>
+        <p className="text-muted">Tournament not found.</p>
         <Link href="/teams" className="text-sm text-emerald-700 dark:text-emerald-400 underline">
           Back to teams
         </Link>
@@ -66,70 +121,65 @@ export function PlayerTagsEditor({ teamId }: { teamId: string }) {
     const t = newTagInput.trim();
     if (!t) return;
     // Not persisted until the first player is toggled onto it — matches
-    // "a tag exists as long as someone has it" (see Player.tags).
+    // "a tag exists as long as someone has it".
     setActiveTag(t);
     setNewTagInput("");
     setError(null);
   };
 
-  const toggleMember = async (player: Player) => {
+  const toggleMember = (player: Player) => {
     if (!activeTag) return;
-    const has = (player.tags ?? []).includes(activeTag);
-    const nextTags = has
-      ? (player.tags ?? []).filter((t) => t !== activeTag)
-      : [...(player.tags ?? []), activeTag];
-    setBusyId(player.id);
-    setError(null);
-    try {
-      await updatePlayer(player.id, { tags: nextTags });
-      await refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusyId(null);
-    }
+    const current = tagsByPlayerId[player.id] ?? [];
+    const has = current.includes(activeTag);
+    const next = has ? current.filter((t) => t !== activeTag) : [...current, activeTag];
+    setTagsByPlayerId((cur) => ({ ...cur, [player.id]: next }));
+    scheduleSync(player.id, next);
   };
 
-  const confirmDeleteTag = async () => {
+  const confirmDeleteTag = () => {
     if (!deletingTag) return;
     const tag = deletingTag;
     setDeletingTag(null);
-    setError(null);
-    try {
-      await Promise.all(
-        players
-          .filter((p) => p.tags?.includes(tag))
-          .map((p) => updatePlayer(p.id, { tags: p.tags!.filter((t) => t !== tag) })),
-      );
-      if (activeTag === tag) setActiveTag(null);
-      await refresh();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
+    const updates = players
+      .filter((p) => (tagsByPlayerId[p.id] ?? []).includes(tag))
+      .map((p): [string, string[]] => [p.id, (tagsByPlayerId[p.id] ?? []).filter((t) => t !== tag)]);
+    setTagsByPlayerId((cur) => {
+      const next = { ...cur };
+      for (const [id, tags] of updates) next[id] = tags;
+      return next;
+    });
+    for (const [id, tags] of updates) scheduleSync(id, tags);
+    if (activeTag === tag) setActiveTag(null);
   };
 
   const members = activeTag
-    ? new Set(players.filter((p) => p.tags?.includes(activeTag)).map((p) => p.id))
+    ? new Set(
+        players.filter((p) => (tagsByPlayerId[p.id] ?? []).includes(activeTag)).map((p) => p.id),
+      )
     : new Set<string>();
 
   return (
     <section className="space-y-6">
       <div className="space-y-2">
         <Link
-          href={`/teams/${teamId}`}
+          href={`/tournaments/${tournamentId}`}
           className="inline-flex items-center gap-1 text-sm text-muted hover:text-fg"
         >
-          <span aria-hidden>←</span> {team.name}
+          <span aria-hidden>←</span> {tournament.name}
         </Link>
         <h1 className="text-xl font-semibold">Player tags</h1>
         <p className="text-sm text-muted">
-          Tag players with custom labels (e.g. &ldquo;Zone D specialist&rdquo;) —
-          filterable in the live caller&rsquo;s line builder.
+          Tag players with custom labels (e.g. &ldquo;Zone D specialist&rdquo;) for this
+          tournament — filterable in the live caller&rsquo;s line builder. Changes save
+          automatically a moment after your last tap.
         </p>
       </div>
 
       <div className="space-y-2 rounded-lg border border-line-strong p-3">
-        <p className="text-sm font-medium">Tags</p>
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-medium">Tags</p>
+          {saving && <span className="text-xs text-faint">Saving…</span>}
+        </div>
         <div className="flex flex-wrap items-center gap-1.5">
           {allTags.map((tag) => (
             <button
@@ -192,7 +242,7 @@ export function PlayerTagsEditor({ teamId }: { teamId: string }) {
             <p className="text-sm text-muted">No players on the team roster yet.</p>
           ) : (
             <div className="grid grid-cols-2 gap-3">
-              {team.division === "mixed" ? (
+              {tournament.division === "mixed" ? (
                 <>
                   <PlayerColumn
                     label="MMP"
@@ -219,7 +269,8 @@ export function PlayerTagsEditor({ teamId }: { teamId: string }) {
                 (() => {
                   const sorted = sortRoster(players);
                   const mid = Math.ceil(sorted.length / 2);
-                  const tone: keyof typeof COLUMN_TONE = team.division === "open" ? "sky" : "rose";
+                  const tone: keyof typeof COLUMN_TONE =
+                    tournament.division === "open" ? "sky" : "rose";
                   const onToggle = (id: string) => {
                     const p = players.find((x) => x.id === id);
                     if (p) toggleMember(p);
@@ -244,7 +295,6 @@ export function PlayerTagsEditor({ teamId }: { teamId: string }) {
               )}
             </div>
           )}
-          {busyId && <p className="text-xs text-faint">Saving…</p>}
         </div>
       )}
 
@@ -253,7 +303,8 @@ export function PlayerTagsEditor({ teamId }: { teamId: string }) {
           <h2 className="font-medium">Delete tag?</h2>
           <p className="text-sm text-muted">
             Remove &ldquo;{deletingTag}&rdquo; from all {tagCounts.get(deletingTag) ?? 0} player
-            {tagCounts.get(deletingTag) === 1 ? "" : "s"} who have it. This can&rsquo;t be undone.
+            {tagCounts.get(deletingTag) === 1 ? "" : "s"} who have it in this tournament. This
+            can&rsquo;t be undone.
           </p>
           <div className="flex justify-end gap-2 pt-1">
             <button

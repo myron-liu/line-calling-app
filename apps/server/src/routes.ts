@@ -271,7 +271,6 @@ export const routes: Route[] = [
         role,
         odPreference: odPreference.optional(),
         jerseyNumber: z.number().optional(),
-        tags: z.array(z.string()).optional(),
       }),
     );
     return json(await q.createPlayer(newId(), id!, body), 201);
@@ -290,7 +289,6 @@ export const routes: Route[] = [
           role: role.optional(),
           odPreference: odPreference.optional(),
           jerseyNumber: z.number().optional(),
-          tags: z.array(z.string()).optional(),
         }),
       );
       const player = await q.updatePlayer(id!, body);
@@ -368,6 +366,32 @@ export const routes: Route[] = [
     await q.batchUpdateTournamentRoster(id!, body.changes);
     await q.syncTournamentGameRosters(tournament.teamId, id!);
     return json(await q.listTournamentRoster(id!));
+  }),
+
+  // ── Tournament-scoped player tags ────────────────────────────────────────
+  authedRoute("GET", "/tournaments/:id/player-tags", tournamentTeamId, async (_req, { id }) =>
+    json(await q.listTournamentPlayerTags(id!)),
+  ),
+  // Same batched-upsert shape as the check-in roster above — the client
+  // debounces rapid taps locally and flushes once after a short idle period
+  // instead of one request per toggle (see player-tags-editor.tsx).
+  authedRoute("PUT", "/tournaments/:id/player-tags", tournamentTeamId, async (req, { id }) => {
+    const body = await parseBody(
+      req,
+      z.object({
+        changes: z.array(
+          z.object({
+            playerId: z.string(),
+            tags: z.array(z.string()),
+          }),
+        ),
+      }),
+    );
+    const tournament = await q.getTournament(id!);
+    if (!tournament) return notFound();
+    await q.batchUpdateTournamentPlayerTags(id!, body.changes);
+    await q.syncTournamentGameRosters(tournament.teamId, id!);
+    return json(await q.listTournamentPlayerTags(id!));
   }),
 
   // ── Saved lines ────────────────────────────────────────────────────────────

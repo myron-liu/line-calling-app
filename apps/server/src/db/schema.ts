@@ -73,12 +73,6 @@ export const players = pgTable("players", {
   role: text("role").notNull(), // "handler" | "cutter" | "both"
   odPreference: text("od_preference"), // "O" | "D" | "both" | null
   jerseyNumber: integer("jersey_number"),
-  // Free-form coach-assigned labels, distinct from role/O-D preference (e.g.
-  // "Zone D specialist", "Rookie") — reused across players the same way
-  // SavedLine.tags works: no separate managed list, just whatever string
-  // values are currently in use across the roster. Filterable in the live
-  // caller's line builder (see live-caller.tsx).
-  tags: jsonb("tags").notNull().default([]).$type<string[]>(),
   createdAt: createdAt(),
 });
 
@@ -111,6 +105,31 @@ export const tournamentRoster = pgTable(
     createdAt: createdAt(),
   },
   (t) => [uniqueIndex("tournament_roster_unique").on(t.tournamentId, t.playerId)],
+);
+
+// Free-form coach-assigned labels, distinct from role/O-D preference (e.g.
+// "Zone D specialist", "Rookie") — tournament-scoped like saved lines/pods,
+// since a team often reuses the same roster differently across tournaments.
+// Deliberately its own table rather than a column on tournamentRoster: that
+// table's row is deleted outright when a player is marked not-present at
+// check-in (see batchUpdateTournamentRoster), which would silently destroy
+// any tags stored there too. Reused across players the same way
+// SavedLine.tags works: no separate managed list, just whatever string
+// values are currently in use. Filterable in the live caller's line builder.
+export const tournamentPlayerTags = pgTable(
+  "tournament_player_tags",
+  {
+    id: id(),
+    tournamentId: text("tournament_id")
+      .notNull()
+      .references(() => tournaments.id, { onDelete: "cascade" }),
+    playerId: text("player_id")
+      .notNull()
+      .references(() => players.id, { onDelete: "cascade" }),
+    tags: jsonb("tags").notNull().default([]).$type<string[]>(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("tournament_player_tags_unique").on(t.tournamentId, t.playerId)],
 );
 
 // ── Saved lines / pods ───────────────────────────────────────────────────────

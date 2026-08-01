@@ -39,7 +39,10 @@ export function rosterSnapshot(
     jerseyNumber: p.jerseyNumber,
     injured: injuredIds.has(p.id),
     active: true,
-    tags: p.tags,
+    // Tags are tournament-scoped (§ TournamentPlayerTags) — the server fills
+    // this in at creation time from that tournament's tags, not from the
+    // player itself (which no longer carries any).
+    tags: [],
   }));
 }
 
