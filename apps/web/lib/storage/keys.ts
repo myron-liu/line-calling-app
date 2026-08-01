@@ -37,11 +37,6 @@ export const keys = {
   /** ISO timestamp of the last successful sync to the server, for the "Last
    *  synced" indicator and the manual resync button. */
   gameLastSync: (gameId: string) => `${prefix}:game:${gameId}:last-sync`,
-  /** A "replay this lineup" signal from the line-history viewer tab (§ game
-   *  history) — written there, consumed by the live game tab's native
-   *  `storage` event listener, since the two are separate browser tabs with
-   *  no other way to talk to each other. */
-  gameReplay: (gameId: string) => `${prefix}:game:${gameId}:replay`,
   /** Reusable saved lines / pods, scoped to a tournament (§4.3). */
   savedLines: (tournamentId: string) => `${prefix}:tournament:${tournamentId}:saved-lines`,
   /** Pending mutations awaiting sync to the Bun server. */

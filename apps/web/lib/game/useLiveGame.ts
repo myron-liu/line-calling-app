@@ -28,12 +28,10 @@ import { api, apiUrl } from "@/lib/api/client";
 import { supabase } from "@/lib/supabase/client";
 import { newId } from "@/lib/id";
 import {
-  clearPendingReplay,
   readGameConfig,
   readLastSyncedAt,
   readLog,
   readMeta,
-  readPendingReplay,
   readRosterSnapshot,
   registerGame,
   setRosterInjured,
@@ -148,11 +146,6 @@ export interface LiveGame {
   savedLines: SavedLine[];
   /** Line pre-selected after an undo, so the coach can re-call it. */
   carryOver: string[] | null;
-  /** A lineup queued from the line-history viewer's separate tab (see
-   *  game-line-history.tsx) — `nonce` changes on every signal so the live
-   *  caller's effect reliably re-applies it even if it's the same lineup as
-   *  last time. Null until the first signal arrives. */
-  replaySeed: { nonce: number; lineup: string[] } | null;
   /** Whether there's anything for the undo/redo buttons to do — the UI
    *  should hide rather than disable them when these are false. */
   canUndo: boolean;
@@ -210,38 +203,6 @@ export function useLiveGame(gameId: string): LiveGameResult {
     status: "idle",
     lastSyncedAt: null,
   });
-  // A lineup selected in the line-history viewer, which opens in its own tab
-  // (see game-line-history.tsx). It hands the lineup over through
-  // localStorage and is picked up two ways, because either tab can be the one
-  // showing the caller when it lands: on mount (the viewer navigates itself
-  // back here after queuing, and a tab never receives its own storage
-  // events), and via the native `storage` event (the tab the viewer was
-  // opened *from* is still sitting on this game). `nonce` changes on every
-  // signal — even a repeated identical lineup — so the line builder's effect
-  // reliably re-fires either way.
-  const [replaySeed, setReplaySeed] = useState<{ nonce: number; lineup: string[] } | null>(
-    null,
-  );
-  useEffect(() => {
-    const replayKey = keys.gameReplay(gameId);
-    const consume = (lineup: string[]) => {
-      setReplaySeed({ nonce: Date.now(), lineup });
-      clearPendingReplay(gameId);
-    };
-    const queued = readPendingReplay(gameId);
-    if (queued) consume(queued);
-    const handler = (e: StorageEvent) => {
-      if (e.key !== replayKey || !e.newValue) return;
-      try {
-        consume(JSON.parse(e.newValue) as string[]);
-      } catch {
-        // Malformed value from some other source — ignore rather than crash.
-      }
-    };
-    window.addEventListener("storage", handler);
-    return () => window.removeEventListener("storage", handler);
-  }, [gameId]);
-
   const defaultMeta = (g: Game): GameMeta => ({
     halftimeReached: false,
     ourTimeoutsRemaining: g.timeoutsPerHalf,
@@ -698,7 +659,6 @@ export function useLiveGame(gameId: string): LiveGameResult {
       points: log.points,
       savedLines,
       carryOver,
-      replaySeed,
       canUndo,
       canRedo: pendingRedo !== null,
       undoLabel,

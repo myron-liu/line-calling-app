@@ -11,7 +11,7 @@ import type {
   Role,
 } from "@shared/game-rules";
 import { keys } from "./keys";
-import { read, remove, write, type WriteResult } from "./store";
+import { read, write, type WriteResult } from "./store";
 
 // ── Game config ────────────────────────────────────────────────────────────────
 
@@ -109,30 +109,6 @@ export function setRosterInjured(
   );
   writeRosterSnapshot(gameId, next);
   return next;
-}
-
-// ── Cross-tab line replay (§ line history) ──────────────────────────────────
-// The line-history viewer opens in its own tab (so the live game stays open
-// alongside it) and has no other channel back to it — this is that channel,
-// via the native `storage` event, which fires in *other* same-origin tabs
-// whenever a key actually changes (never the tab that wrote it).
-
-export function writePendingReplay(gameId: string, lineup: string[]): WriteResult {
-  return write(keys.gameReplay(gameId), lineup);
-}
-
-/** Also read on the live caller's own mount, not just via the `storage`
- *  event — the viewer navigates *itself* back to the game after queuing a
- *  lineup, and a tab never receives its own storage events. */
-export function readPendingReplay(gameId: string): string[] | null {
-  return read<string[] | null>(keys.gameReplay(gameId), null);
-}
-
-/** Best-effort cleanup after the live tab consumes a replay signal — not
- *  required for correctness (each new replay is a genuine value change
- *  either way), just avoids a stale queued lineup lingering indefinitely. */
-export function clearPendingReplay(gameId: string): void {
-  remove(keys.gameReplay(gameId));
 }
 
 // ── Last sync (§ manual resync) ────────────────────────────────────────────────

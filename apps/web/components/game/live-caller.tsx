@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import {
   SITUATION_TAGS,
   genderStateLabel,
@@ -27,6 +26,7 @@ import {
   roleTag,
   sortRoster,
 } from "@/lib/player-display";
+import { LineHistory } from "./game-line-history";
 
 // ── Game clock (§8) ──────────────────────────────────────────────────────────
 
@@ -52,7 +52,7 @@ function formatClock(totalSeconds: number): string {
 
 // The live line caller (§8). Drives the engine hook; only reads/writes localStorage.
 export function LiveCaller({ live }: { live: LiveGame }) {
-  const { game, roster, state, carryOver, actions, error } = live;
+  const { state, carryOver, points, error } = live;
   // The next line prepared during the current point_in_progress phase (see
   // InProgressControls) — seeds the following point's LineBuilder the moment
   // it opens, so confirming it is a single tap instead of rebuilding from
@@ -60,6 +60,18 @@ export function LiveCaller({ live }: { live: LiveGame }) {
   // embedded prepare-mode LineBuilder reports its own initial empty selection
   // right on mount), so nothing stale can leak into a later point.
   const [nextLineDraft, setNextLineDraft] = useState<string[]>([]);
+  const [tab, setTab] = useState<"live" | "history">("live");
+  // A lineup picked from the Line history tab. `nonce` changes on every pick —
+  // even a repeated identical lineup — so the line builder's effect reliably
+  // re-fires and applies it.
+  const [replaySeed, setReplaySeed] = useState<{ nonce: number; lineup: string[] } | null>(
+    null,
+  );
+
+  const useHistoricalLine = (lineup: string[]) => {
+    setReplaySeed({ nonce: Date.now(), lineup });
+    setTab("live");
+  };
 
   return (
     <div className="space-y-4">
@@ -69,24 +81,75 @@ export function LiveCaller({ live }: { live: LiveGame }) {
           {error}
         </p>
       )}
-      {state.phase === "awaiting_line" && (
-        <LineBuilder
-          live={live}
-          key={`p${state.currentPointNumber}`}
-          seed={nextLineDraft.length > 0 ? nextLineDraft : carryOver}
-          mode="confirm"
-          pointNumber={state.currentPointNumber}
-          genderRatio={state.genderRatio}
-          od={state.od}
-          replaySeed={live.replaySeed}
-        />
-      )}
-      {state.phase === "point_in_progress" && (
-        <InProgressControls live={live} onNextLineDraftChange={setNextLineDraft} />
+
+      {/* Line history is only worth a tab once there's a line to look back at
+          — any point with a lineup counts, including one still being played. */}
+      {points.length > 0 && (
+        <div className="flex gap-1 border-b border-line text-sm">
+          <Tab label="Live game" active={tab === "live"} onClick={() => setTab("live")} />
+          <Tab
+            label="Line history"
+            active={tab === "history"}
+            onClick={() => setTab("history")}
+          />
+        </div>
       )}
 
-      <SecondaryControls live={live} />
+      {/* Both tabs stay mounted and are shown/hidden rather than swapped, so
+          glancing at the history mid-build doesn't throw away a half-picked
+          line (the builder's selection lives in its own state). */}
+      <div className={tab === "live" ? "space-y-4" : "hidden"}>
+        {state.phase === "awaiting_line" && (
+          <LineBuilder
+            live={live}
+            key={`p${state.currentPointNumber}`}
+            seed={nextLineDraft.length > 0 ? nextLineDraft : carryOver}
+            mode="confirm"
+            pointNumber={state.currentPointNumber}
+            genderRatio={state.genderRatio}
+            od={state.od}
+            replaySeed={replaySeed}
+          />
+        )}
+        {state.phase === "point_in_progress" && (
+          <InProgressControls
+            live={live}
+            onNextLineDraftChange={setNextLineDraft}
+            replaySeed={replaySeed}
+          />
+        )}
+
+        <SecondaryControls live={live} />
+      </div>
+
+      <div className={tab === "history" ? "" : "hidden"}>
+        <LineHistory live={live} onUseLine={useHistoricalLine} />
+      </div>
     </div>
+  );
+}
+
+function Tab({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      aria-current={active ? "page" : undefined}
+      className={`-mb-px border-b-2 px-3 py-1.5 ${
+        active
+          ? "border-emerald-600 font-medium text-emerald-700 dark:text-emerald-400"
+          : "border-transparent text-muted"
+      }`}
+    >
+      {label}
+    </button>
   );
 }
 
@@ -677,19 +740,6 @@ function LineBuilder({
 
   return (
     <div className="space-y-3">
-      {/* Only worth offering once there's actually a line to look back at —
-          any point with a lineup counts, including one still being played. */}
-      {points.length > 0 && (
-        <Link
-          href={`/games/${game.id}/history`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-block rounded-md border border-line-strong px-3 py-1.5 text-sm"
-        >
-          Line history ↗
-        </Link>
-      )}
-
       <SavedLinesBar
         lines={visibleQuickLines}
         appliedIds={appliedLineIds}
@@ -1503,9 +1553,11 @@ function SaveLineButton({
 function InProgressControls({
   live,
   onNextLineDraftChange,
+  replaySeed,
 }: {
   live: LiveGame;
   onNextLineDraftChange: (ids: string[]) => void;
+  replaySeed: { nonce: number; lineup: string[] } | null;
 }) {
   const { game, roster, state, points, actions } = live;
   const nextPointNumber = state.currentPointNumber + 1;
@@ -1545,7 +1597,7 @@ function InProgressControls({
           genderRatio={nextGenderRatio}
           od={undefined}
           onSelectionChange={onNextLineDraftChange}
-          replaySeed={live.replaySeed}
+          replaySeed={replaySeed}
         />
       </div>
     </div>
