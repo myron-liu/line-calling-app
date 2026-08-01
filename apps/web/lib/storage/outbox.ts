@@ -21,7 +21,9 @@ export type OutboxEventType =
   | "timeout"
   | "endGame"
   | "undo"
-  | "redo";
+  | "redo"
+  | "addStat"
+  | "removeStat";
 
 export interface OutboxEvent {
   /** Idempotency key; the server upserts on this. */

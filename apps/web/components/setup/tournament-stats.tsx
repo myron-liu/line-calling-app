@@ -2,7 +2,11 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import type { Tournament } from "@shared/game-rules";
+import {
+  defensiveEfficiency,
+  offensiveEfficiency,
+  type Tournament,
+} from "@shared/game-rules";
 import { findTournament } from "@/lib/storage/tournaments";
 import {
   readTournamentStats,
@@ -17,7 +21,12 @@ type StatSortKey =
   | "dPointsPlayed"
   | "dPlusMinus"
   | "oPointsPlayed"
-  | "oPlusMinus";
+  | "oPlusMinus"
+  | "assists"
+  | "goals"
+  | "blocks"
+  | "turnovers"
+  | "callahans";
 
 interface StatSort {
   key: StatSortKey;
@@ -105,6 +114,13 @@ export function TournamentStats({ tournamentId }: { tournamentId: string }) {
           <StatTile label="Breaks" value={stats.breaks} />
           <StatTile label="Opponent held" value={stats.opponentHolds} />
         </div>
+        {/* Conversion rates off the same four counts: what share of the
+            points we started on O we held, and of those started on D we
+            broke. */}
+        <div className="grid grid-cols-2 gap-2">
+          <StatTile label="O% (holds / O points)" value={formatPercent(offensiveEfficiency(stats))} />
+          <StatTile label="D% (breaks / D points)" value={formatPercent(defensiveEfficiency(stats))} />
+        </div>
       </div>
 
       <div className="space-y-2">
@@ -144,7 +160,7 @@ export function TournamentStats({ tournamentId }: { tournamentId: string }) {
   );
 }
 
-function StatTile({ label, value }: { label: string; value: number }) {
+function StatTile({ label, value }: { label: string; value: number | string }) {
   return (
     <div className="rounded-lg border border-line p-2 text-center">
       <p className="text-2xl font-bold tabular-nums">{value}</p>
@@ -155,6 +171,12 @@ function StatTile({ label, value }: { label: string; value: number }) {
 
 function formatPlusMinus(n: number): string {
   return n > 0 ? `+${n}` : `${n}`;
+}
+
+/** A dash rather than "0%" when no points of that kind have been played —
+ *  see offensiveEfficiency for why the distinction matters. */
+function formatPercent(ratio: number | null): string {
+  return ratio === null ? "—" : `${Math.round(ratio * 100)}%`;
 }
 
 /** Column header that sorts its column on click, toggling asc/desc on repeat
@@ -189,6 +211,20 @@ function SortableTh({
         {active && <span aria-hidden>{sort.dir === "asc" ? "▲" : "▼"}</span>}
       </button>
     </th>
+  );
+}
+
+/** A hand-recorded count. Zeros are dimmed further so the numbers that were
+ *  actually recorded stand out in a table that's mostly zeros early on. */
+function StatCell({ value }: { value: number }) {
+  return (
+    <td
+      className={`border-b border-line py-1 text-right tabular-nums ${
+        value === 0 ? "text-faint" : "text-fg"
+      }`}
+    >
+      {value}
+    </td>
   );
 }
 
@@ -227,6 +263,11 @@ function PlayerStatsTable({
           <SortableTh label="D +/-" sortKey="dPlusMinus" sort={sort} onSort={onSort} align="right" />
           <SortableTh label="O Pts" sortKey="oPointsPlayed" sort={sort} onSort={onSort} align="right" />
           <SortableTh label="O +/-" sortKey="oPlusMinus" sort={sort} onSort={onSort} align="right" />
+          <SortableTh label="A" sortKey="assists" sort={sort} onSort={onSort} align="right" />
+          <SortableTh label="G" sortKey="goals" sort={sort} onSort={onSort} align="right" />
+          <SortableTh label="D" sortKey="blocks" sort={sort} onSort={onSort} align="right" />
+          <SortableTh label="T" sortKey="turnovers" sort={sort} onSort={onSort} align="right" />
+          <SortableTh label="C" sortKey="callahans" sort={sort} onSort={onSort} align="right" />
         </tr>
       </thead>
       <tbody>
@@ -253,6 +294,11 @@ function PlayerStatsTable({
             <td className="border-b border-line py-1 text-right tabular-nums text-muted">
               {formatPlusMinus(p.oPlusMinus)}
             </td>
+            <StatCell value={p.assists} />
+            <StatCell value={p.goals} />
+            <StatCell value={p.blocks} />
+            <StatCell value={p.turnovers} />
+            <StatCell value={p.callahans} />
           </tr>
         ))}
       </tbody>

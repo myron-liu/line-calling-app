@@ -2,8 +2,22 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import type { Game, GenderMatch, OD, Point, PlayerPointOutcomes } from "@shared/game-rules";
-import { playerPointOutcomes, teamPointOutcomes } from "@shared/game-rules";
+import type {
+  Game,
+  GenderMatch,
+  OD,
+  Point,
+  PlayerPointOutcomes,
+  PlayerStatTotals,
+} from "@shared/game-rules";
+import {
+  defensiveEfficiency,
+  emptyStatTotals,
+  offensiveEfficiency,
+  playerPointOutcomes,
+  playerStatTotals,
+  teamPointOutcomes,
+} from "@shared/game-rules";
 import { useLiveGame, type LiveGame } from "@/lib/game/useLiveGame";
 import { readTeam } from "@/lib/storage/teams";
 import { findTournament } from "@/lib/storage/tournaments";
@@ -236,6 +250,7 @@ function Recap({ live }: { live: LiveGame }) {
   );
   const outcomes = useMemo(() => teamPointOutcomes(points), [points]);
   const playerOutcomes = useMemo(() => playerPointOutcomes(points), [points]);
+  const statTotals = useMemo(() => playerStatTotals(points), [points]);
 
   return (
     <section className="space-y-4">
@@ -268,6 +283,7 @@ function Recap({ live }: { live: LiveGame }) {
         roster={roster}
         pointsPlayed={state.pointsPlayed}
         playerOutcomes={playerOutcomes}
+        statTotals={statTotals}
       />
     </section>
   );
@@ -291,11 +307,16 @@ function OverallStats({
         <StatTile label="Breaks" value={outcomes.breaks} />
         <StatTile label="Opponent held" value={outcomes.opponentHolds} />
       </div>
+      {/* Conversion rates off the same four counts. */}
+      <div className="grid grid-cols-2 gap-2">
+        <StatTile label="O% (holds / O points)" value={formatPercent(offensiveEfficiency(outcomes))} />
+        <StatTile label="D% (breaks / D points)" value={formatPercent(defensiveEfficiency(outcomes))} />
+      </div>
     </div>
   );
 }
 
-function StatTile({ label, value }: { label: string; value: number }) {
+function StatTile({ label, value }: { label: string; value: number | string }) {
   return (
     <div className="rounded-lg border border-line p-2 text-center">
       <p className="text-2xl font-bold tabular-nums">{value}</p>
@@ -370,6 +391,7 @@ function LineHistory({
             <p className="mt-1 text-faint">
               {p.lineup.map((id) => nameFor(id)).join(", ")}
             </p>
+            <PointStatLine point={p} nameFor={nameFor} />
             {p.substitutions && p.substitutions.length > 0 && (
               <ul className="mt-1 space-y-0.5">
                 {p.substitutions.map((s, si) => (
@@ -398,7 +420,12 @@ type StatSortKey =
   | "dPointsPlayed"
   | "dPlusMinus"
   | "oPointsPlayed"
-  | "oPlusMinus";
+  | "oPlusMinus"
+  | "assists"
+  | "goals"
+  | "blocks"
+  | "turnovers"
+  | "callahans";
 
 interface StatSort {
   key: StatSortKey;
@@ -410,7 +437,7 @@ function toggleStatSort(cur: StatSort, key: StatSortKey): StatSort {
   return { key, dir: key === "name" ? "asc" : "desc" };
 }
 
-interface StatRow {
+interface StatRow extends PlayerStatTotals {
   p: RosterSnapshotEntry;
   count: number;
   oPointsPlayed: number;
@@ -432,10 +459,12 @@ function PointsPlayedTables({
   roster,
   pointsPlayed,
   playerOutcomes,
+  statTotals,
 }: {
   roster: RosterSnapshotEntry[];
   pointsPlayed: Record<string, number>;
   playerOutcomes: Record<string, PlayerPointOutcomes>;
+  statTotals: Record<string, PlayerStatTotals>;
 }) {
   const [sort, setSort] = useState<StatSort>({ key: "count", dir: "desc" });
   const onSort = (key: StatSortKey) => setSort((cur) => toggleStatSort(cur, key));
@@ -447,6 +476,7 @@ function PointsPlayedTables({
           roster={roster}
           pointsPlayed={pointsPlayed}
           playerOutcomes={playerOutcomes}
+          statTotals={statTotals}
           sort={sort}
           onSort={onSort}
         />
@@ -457,6 +487,7 @@ function PointsPlayedTables({
           roster={roster}
           pointsPlayed={pointsPlayed}
           playerOutcomes={playerOutcomes}
+          statTotals={statTotals}
           sort={sort}
           onSort={onSort}
         />
@@ -467,6 +498,66 @@ function PointsPlayedTables({
 
 function formatPlusMinus(n: number): string {
   return n > 0 ? `+${n}` : `${n}`;
+}
+
+/** A dash rather than "0%" when no points of that kind have been played —
+ *  see offensiveEfficiency for why the distinction matters. */
+function formatPercent(ratio: number | null): string {
+  return ratio === null ? "—" : `${Math.round(ratio * 100)}%`;
+}
+
+/** A hand-recorded count, dimmed at zero so real numbers stand out. */
+function StatCell({ value }: { value: number }) {
+  return (
+    <td
+      className={`border-b border-line py-1 text-right tabular-nums ${
+        value === 0 ? "text-faint" : "text-fg"
+      }`}
+    >
+      {value}
+    </td>
+  );
+}
+
+/** Everything recorded by hand for one point (§ stats) — who scored it, plus
+ *  each D and turnover. Renders nothing when nothing was recorded. */
+function PointStatLine({
+  point,
+  nameFor,
+}: {
+  point: Point;
+  nameFor: (id: string) => string;
+}) {
+  const events = point.statEvents ?? [];
+  const s = point.scoring;
+  if (!s && events.length === 0) return null;
+  return (
+    <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
+      {s?.kind === "goal" && (
+        <span className="rounded bg-emerald-100 px-1.5 py-0.5 font-medium text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-300">
+          {s.assistPlayerId ? `${nameFor(s.assistPlayerId)} → ` : ""}
+          {nameFor(s.goalPlayerId)}
+        </span>
+      )}
+      {s?.kind === "callahan" && (
+        <span className="rounded bg-violet-100 px-1.5 py-0.5 font-medium text-violet-800 dark:bg-violet-500/20 dark:text-violet-300">
+          Callahan · {nameFor(s.playerId)}
+        </span>
+      )}
+      {events.map((ev) => (
+        <span
+          key={ev.id}
+          className={`rounded px-1.5 py-0.5 ${
+            ev.type === "block"
+              ? "bg-blue-100 text-blue-800 dark:bg-blue-500/20 dark:text-blue-300"
+              : "bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-300"
+          }`}
+        >
+          {ev.type === "block" ? "D" : "T"} · {nameFor(ev.playerId)}
+        </span>
+      ))}
+    </p>
+  );
 }
 
 /** Column header that sorts its column on click, toggling asc/desc on repeat
@@ -509,6 +600,7 @@ function PointsPlayedTable({
   roster,
   pointsPlayed,
   playerOutcomes,
+  statTotals,
   sort,
   onSort,
 }: {
@@ -516,6 +608,7 @@ function PointsPlayedTable({
   roster: RosterSnapshotEntry[];
   pointsPlayed: Record<string, number>;
   playerOutcomes: Record<string, PlayerPointOutcomes>;
+  statTotals: Record<string, PlayerStatTotals>;
   sort: StatSort;
   onSort: (key: StatSortKey) => void;
 }) {
@@ -530,6 +623,7 @@ function PointsPlayedTable({
         dPointsPlayed: o?.dPointsPlayed ?? 0,
         oPlusMinus: o?.oPlusMinus ?? 0,
         dPlusMinus: o?.dPlusMinus ?? 0,
+        ...(statTotals[p.playerId] ?? emptyStatTotals()),
       };
     })
     .sort((a, b) => compareStatRows(a, b, sort));
@@ -549,10 +643,17 @@ function PointsPlayedTable({
           <SortableTh label="D +/-" sortKey="dPlusMinus" sort={sort} onSort={onSort} align="right" />
           <SortableTh label="O Pts" sortKey="oPointsPlayed" sort={sort} onSort={onSort} align="right" />
           <SortableTh label="O +/-" sortKey="oPlusMinus" sort={sort} onSort={onSort} align="right" />
+          <SortableTh label="A" sortKey="assists" sort={sort} onSort={onSort} align="right" />
+          <SortableTh label="G" sortKey="goals" sort={sort} onSort={onSort} align="right" />
+          <SortableTh label="D" sortKey="blocks" sort={sort} onSort={onSort} align="right" />
+          <SortableTh label="T" sortKey="turnovers" sort={sort} onSort={onSort} align="right" />
+          <SortableTh label="C" sortKey="callahans" sort={sort} onSort={onSort} align="right" />
         </tr>
       </thead>
       <tbody>
-        {rows.map(({ p, count, oPointsPlayed, dPointsPlayed, oPlusMinus, dPlusMinus }) => (
+        {rows.map((row) => {
+          const { p, count, oPointsPlayed, dPointsPlayed, oPlusMinus, dPlusMinus } = row;
+          return (
           <tr key={p.playerId}>
             <td className="border-b border-line py-1">{displayName(p)}</td>
             <td className="border-b border-line py-1 text-right tabular-nums text-muted">
@@ -570,8 +671,14 @@ function PointsPlayedTable({
             <td className="border-b border-line py-1 text-right tabular-nums text-muted">
               {formatPlusMinus(oPlusMinus)}
             </td>
+            <StatCell value={row.assists} />
+            <StatCell value={row.goals} />
+            <StatCell value={row.blocks} />
+            <StatCell value={row.turnovers} />
+            <StatCell value={row.callahans} />
           </tr>
-        ))}
+          );
+        })}
       </tbody>
     </table>
   );

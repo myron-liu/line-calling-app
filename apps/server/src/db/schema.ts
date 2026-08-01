@@ -256,6 +256,16 @@ export const points = pgTable(
     // existed, or (startedAt only) while a point is still in progress.
     startedAt: timestamp("started_at", { withTimezone: true }),
     endedAt: timestamp("ended_at", { withTimezone: true }),
+    // Recorded stats (§ stats): Ds/turnovers tapped in while the point was
+    // live, and how a point we won was scored. Both null for points played
+    // before stat recording existed.
+    statEvents: jsonb("stat_events").$type<
+      { id: string; playerId: string; type: "block" | "turnover" }[]
+    >(),
+    scoring: jsonb("scoring").$type<
+      | { kind: "goal"; assistPlayerId?: string; goalPlayerId: string }
+      | { kind: "callahan"; playerId: string }
+    >(),
   },
   (t) => [uniqueIndex("points_game_point_unique").on(t.gameId, t.pointNumber)],
 );

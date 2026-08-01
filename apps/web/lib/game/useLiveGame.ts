@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  addStatEvent,
   callHalftime,
   callTimeout,
   confirmLine,
@@ -12,6 +13,7 @@ import {
   injurySub,
   recordResult,
   redoAction as replayRedo,
+  removeStatEvent,
   undoLastPoint,
   type Game,
   type GameLogState,
@@ -23,6 +25,8 @@ import {
   type PointResult,
   type RedoAction,
   type SavedLine,
+  type Scoring,
+  type StatEventType,
 } from "@shared/game-rules";
 import { api, apiUrl } from "@/lib/api/client";
 import { supabase } from "@/lib/supabase/client";
@@ -157,7 +161,13 @@ export interface LiveGame {
   sync: SyncState;
   actions: {
     confirmLine: (lineup: string[]) => void;
-    recordResult: (scorer: PointResult) => void;
+    /** `scoring` is the optional goal/Callahan detail captured by the
+     *  "We scored" modal; only meaningful when scorer is "us". */
+    recordResult: (scorer: PointResult, scoring?: Scoring) => void;
+    /** Credit a D or a turnover to a player on the field right now. */
+    addStatEvent: (playerId: string, type: StatEventType) => void;
+    /** Undo one mis-recorded stat event on the in-progress point. */
+    removeStatEvent: (eventId: string) => void;
     callHalftime: () => void;
     callTimeout: (team: PointResult) => void;
     injurySub: (injuredPlayerId: string, replacementPlayerId: string) => void;
@@ -497,11 +507,25 @@ export function useLiveGame(gameId: string): LiveGameResult {
           });
           setCarryOver(null);
         }),
-      recordResult: (scorer: PointResult) =>
+      recordResult: (scorer: PointResult, scoring?: Scoring) =>
         run(() => {
           if (!game || !log) return;
           const endedAt = new Date().toISOString();
-          commit(recordResult(game, log, scorer, endedAt), "recordResult", { scorer });
+          commit(recordResult(game, log, scorer, endedAt, scoring), "recordResult", {
+            scorer,
+            scoring,
+          });
+        }),
+      addStatEvent: (playerId: string, type: StatEventType) =>
+        run(() => {
+          if (!log) return;
+          const event = { id: newId(), playerId, type };
+          commit(addStatEvent(log, event), "addStat", event);
+        }),
+      removeStatEvent: (eventId: string) =>
+        run(() => {
+          if (!log) return;
+          commit(removeStatEvent(log, eventId), "removeStat", { eventId });
         }),
       callHalftime: () =>
         run(() => {

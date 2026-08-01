@@ -148,6 +148,13 @@ export interface TournamentPlayerStats {
   dPointsPlayed: number;
   oPlusMinus: number;
   dPlusMinus: number;
+  /** Hand-recorded during play (§ stats) — the A/G/D/T/C columns. Zero for
+   *  games played before stat recording existed. */
+  assists: number;
+  goals: number;
+  blocks: number;
+  turnovers: number;
+  callahans: number;
 }
 
 export interface TournamentStats {

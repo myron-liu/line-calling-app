@@ -217,6 +217,34 @@ export interface Substitution {
   replacementPlayerId: string;
 }
 
+/** A defensive block ("D") or a turnover (a throwaway or a drop), credited to
+ *  one player and recorded live while the point is being played (§ stats). */
+export type StatEventType = "block" | "turnover";
+
+/**
+ * One recorded stat event. Kept as a list of individually-identified entries
+ * rather than per-player counts so a mis-tap can be removed on its own — a
+ * coach tapping this on a sideline gets it wrong sometimes, and "undo that
+ * one D" has to be possible without recomputing anything.
+ */
+export interface StatEvent {
+  id: string;
+  playerId: string;
+  type: StatEventType;
+}
+
+/**
+ * How a point we won was scored. A Callahan (catching a block in the
+ * opponent's end zone) is one player and no assist, so it's its own variant
+ * rather than a goal with a missing thrower.
+ *
+ * Deliberately counted as *only* a Callahan in the aggregates — not also as a
+ * goal and a block — so the C column is never double-counted against G and D.
+ */
+export type Scoring =
+  | { kind: "goal"; assistPlayerId?: string; goalPlayerId: string }
+  | { kind: "callahan"; playerId: string };
+
 export interface Point {
   id: string;
   gameId: string;
@@ -239,6 +267,14 @@ export interface Point {
    *  here. Undefined while the point is still in progress, or for points
    *  synced before this field existed. */
   endedAt?: string;
+  /** Ds and turnovers recorded while this point was live (§ stats). Absent
+   *  for points played before stat recording existed, or where the coach
+   *  simply didn't record any. */
+  statEvents?: StatEvent[];
+  /** How we scored, captured alongside `result: "us"`. Never set for a point
+   *  the opponent scored, and optional even for ours — the coach can skip the
+   *  detail and just bank the point. */
+  scoring?: Scoring;
 }
 
 /**

@@ -85,6 +85,25 @@ const pointSchema = z.object({
   isFirstAfterHalftime: z.boolean(),
   startedAt: z.string().optional(),
   endedAt: z.string().optional(),
+  statEvents: z
+    .array(
+      z.object({
+        id: z.string(),
+        playerId: z.string(),
+        type: z.enum(["block", "turnover"]),
+      }),
+    )
+    .optional(),
+  scoring: z
+    .discriminatedUnion("kind", [
+      z.object({
+        kind: z.literal("goal"),
+        assistPlayerId: z.string().optional(),
+        goalPlayerId: z.string(),
+      }),
+      z.object({ kind: z.literal("callahan"), playerId: z.string() }),
+    ])
+    .optional(),
 });
 
 const gameMetaSchema = z.object({

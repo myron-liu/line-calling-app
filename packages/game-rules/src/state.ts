@@ -15,6 +15,8 @@ import type {
   OD,
   Point,
   PointResult,
+  Scoring,
+  StatEvent,
 } from "./types";
 import { lastPlayedPoint, odForPoint, pointsPlayed, ratioForPoint } from "./rules";
 
@@ -211,12 +213,16 @@ export function recordResult(
   state: GameLogState,
   scorer: PointResult,
   endedAt?: string,
+  scoring?: Scoring,
 ): GameLogState {
   const idx = state.points.findIndex((p) => p.result === undefined);
   if (idx === -1) throw new Error("No point in progress");
 
+  // Scoring detail only makes sense for a point we won — silently dropping it
+  // otherwise beats trusting a caller that got the pairing wrong.
+  const detail = scorer === "us" ? scoring : undefined;
   const points = state.points.map((p, i) =>
-    i === idx ? { ...p, result: scorer, endedAt } : p,
+    i === idx ? { ...p, result: scorer, endedAt, scoring: detail } : p,
   );
 
   let meta = state.meta;
@@ -302,6 +308,54 @@ export function injurySub(
   };
 }
 
+// ── Recorded stats — § stats ────────────────────────────────────────────────
+
+/**
+ * Credit a D or a turnover to a player on the point currently being played.
+ *
+ * Validated against who's *actually on the field* (injury subs applied), not
+ * the starting 7 — a player subbed in mid-point can absolutely get a block,
+ * and one subbed out can't.
+ */
+export function addStatEvent(
+  state: GameLogState,
+  event: StatEvent,
+): GameLogState {
+  const idx = state.points.findIndex((p) => p.result === undefined);
+  if (idx === -1) throw new Error("No point in progress");
+  const point = state.points[idx]!;
+  if (!effectiveOnField(point).includes(event.playerId)) {
+    throw new Error("Player is not on the field for this point");
+  }
+  const updated: Point = {
+    ...point,
+    statEvents: [...(point.statEvents ?? []), event],
+  };
+  return {
+    points: state.points.map((p, i) => (i === idx ? updated : p)),
+    meta: state.meta,
+  };
+}
+
+/** Drop a single mis-recorded stat event from the in-progress point. Unknown
+ *  ids are a no-op, so a double-tap on remove can't throw. */
+export function removeStatEvent(
+  state: GameLogState,
+  eventId: string,
+): GameLogState {
+  const idx = state.points.findIndex((p) => p.result === undefined);
+  if (idx === -1) throw new Error("No point in progress");
+  const point = state.points[idx]!;
+  const updated: Point = {
+    ...point,
+    statEvents: (point.statEvents ?? []).filter((e) => e.id !== eventId),
+  };
+  return {
+    points: state.points.map((p, i) => (i === idx ? updated : p)),
+    meta: state.meta,
+  };
+}
+
 /** Manually end the game at the current score (undoable, §13.8). */
 export function endGame(state: GameLogState): GameLogState {
   return { points: state.points, meta: { ...state.meta, endedManually: true } };
@@ -326,7 +380,7 @@ export function editPointLineup(
  *  reverted, so redo() can just re-dispatch it instead of duplicating logic. */
 export type RedoAction =
   | { type: "confirmLine"; lineup: string[]; pointId: string; startedAt?: string }
-  | { type: "recordResult"; scorer: PointResult; endedAt?: string }
+  | { type: "recordResult"; scorer: PointResult; endedAt?: string; scoring?: Scoring }
   | { type: "endGame" }
   | { type: "callHalftime" };
 
@@ -398,8 +452,11 @@ export function undoLastPoint(
   }
 
   const lastEndedAt = last.endedAt;
+  const lastScoring = last.scoring;
   const points = state.points.map((p, i) =>
-    i === state.points.length - 1 ? { ...p, result: undefined, endedAt: undefined } : p,
+    i === state.points.length - 1
+      ? { ...p, result: undefined, endedAt: undefined, scoring: undefined }
+      : p,
   );
   const wasHalftime = state.meta.halftimeReached;
   const nowHalftime = deriveHalftimeReached(game, points);
@@ -413,7 +470,12 @@ export function undoLastPoint(
     points,
     meta,
     restoredLineup: null,
-    redo: { type: "recordResult", scorer: last.result, endedAt: lastEndedAt },
+    redo: {
+      type: "recordResult",
+      scorer: last.result,
+      endedAt: lastEndedAt,
+      scoring: lastScoring,
+    },
   };
 }
 
@@ -429,7 +491,7 @@ export function redoAction(
     case "confirmLine":
       return confirmLine(game, state, action.lineup, action.pointId, action.startedAt);
     case "recordResult":
-      return recordResult(game, state, action.scorer, action.endedAt);
+      return recordResult(game, state, action.scorer, action.endedAt, action.scoring);
     case "endGame":
       return endGame(state);
     case "callHalftime":

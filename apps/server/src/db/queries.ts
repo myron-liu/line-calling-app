@@ -9,7 +9,9 @@
 import { and, eq, isNull } from "drizzle-orm";
 import {
   deriveLiveGameState,
+  emptyStatTotals,
   playerPointOutcomes,
+  playerStatTotals,
   pointsPlayed,
   teamPointOutcomes,
 } from "@shared/game-rules";
@@ -978,6 +980,11 @@ export interface TournamentPlayerStats {
   dPointsPlayed: number;
   oPlusMinus: number;
   dPlusMinus: number;
+  assists: number;
+  goals: number;
+  blocks: number;
+  turnovers: number;
+  callahans: number;
 }
 
 export interface TournamentStats {
@@ -1028,9 +1035,19 @@ export async function getTournamentStats(
 
     const played = pointsPlayed(pts);
     const perPlayerOutcomes = playerPointOutcomes(pts);
+    const statTotals = playerStatTotals(pts);
     const rosterById = new Map(rosterRows.map((r) => [r.playerId, toRosterEntry(r)]));
 
-    for (const [playerId, count] of Object.entries(played)) {
+    // Union of both keyings: points-played only counts *completed* points,
+    // while recorded stats include the point still being played — so a D
+    // tapped in during a live point must not go missing just because its
+    // point hasn't finished yet.
+    const playerIds = new Set([
+      ...Object.keys(played),
+      ...Object.keys(statTotals),
+    ]);
+
+    for (const playerId of playerIds) {
       const rosterEntry = rosterById.get(playerId);
       if (!rosterEntry) continue;
       const entry = playerAgg.get(playerId) ?? {
@@ -1044,14 +1061,23 @@ export async function getTournamentStats(
         dPointsPlayed: 0,
         oPlusMinus: 0,
         dPlusMinus: 0,
+        ...emptyStatTotals(),
       };
-      entry.pointsPlayed += count;
+      entry.pointsPlayed += played[playerId] ?? 0;
       const o = perPlayerOutcomes[playerId];
       if (o) {
         entry.oPointsPlayed += o.oPointsPlayed;
         entry.dPointsPlayed += o.dPointsPlayed;
         entry.oPlusMinus += o.oPlusMinus;
         entry.dPlusMinus += o.dPlusMinus;
+      }
+      const st = statTotals[playerId];
+      if (st) {
+        entry.assists += st.assists;
+        entry.goals += st.goals;
+        entry.blocks += st.blocks;
+        entry.turnovers += st.turnovers;
+        entry.callahans += st.callahans;
       }
       entry.name = rosterEntry.name;
       entry.nickname = rosterEntry.nickname;
@@ -1183,6 +1209,8 @@ export async function syncGame(
         isFirstAfterHalftime: p.isFirstAfterHalftime,
         startedAt: p.startedAt ? new Date(p.startedAt) : undefined,
         endedAt: p.endedAt ? new Date(p.endedAt) : undefined,
+        statEvents: p.statEvents,
+        scoring: p.scoring,
       })),
     );
   }
@@ -1290,5 +1318,7 @@ function toPoint(row: typeof points.$inferSelect): Point {
     isFirstAfterHalftime: row.isFirstAfterHalftime,
     startedAt: row.startedAt?.toISOString(),
     endedAt: row.endedAt?.toISOString(),
+    statEvents: row.statEvents ?? undefined,
+    scoring: row.scoring ?? undefined,
   };
 }

@@ -154,6 +154,68 @@ export function teamPointOutcomes(points: Point[]): TeamPointOutcomes {
 }
 
 /**
+ * Offensive efficiency: the share of points started on O that we converted
+ * into a hold. Null when we haven't started a point on O yet — a 0% that only
+ * means "no data" reads as a damning stat line, so callers render a dash.
+ */
+export function offensiveEfficiency(o: TeamPointOutcomes): number | null {
+  const played = o.holds + o.broken;
+  return played === 0 ? null : o.holds / played;
+}
+
+/** Defensive efficiency: the share of points started on D we converted into a
+ *  break. Null when no D points have been played (see above). */
+export function defensiveEfficiency(o: TeamPointOutcomes): number | null {
+  const played = o.breaks + o.opponentHolds;
+  return played === 0 ? null : o.breaks / played;
+}
+
+// ── Recorded stats (Ds, turnovers, goals) — § stats ─────────────────────────
+
+/** Per-player totals of everything recorded by hand during play, in the same
+ *  order the stats table's A/G/D/T/C columns read. */
+export interface PlayerStatTotals {
+  assists: number;
+  goals: number;
+  blocks: number;
+  turnovers: number;
+  callahans: number;
+}
+
+export function emptyStatTotals(): PlayerStatTotals {
+  return { assists: 0, goals: 0, blocks: 0, turnovers: 0, callahans: 0 };
+}
+
+/**
+ * Tally every recorded stat event and scoring credit across the given points.
+ *
+ * Unlike the +/- and points-played counters, this includes the in-progress
+ * point — a D is a D the moment it's tapped, and the live caller shows these
+ * back to the coach immediately. A Callahan credits only `callahans` (see
+ * the Scoring type for why).
+ */
+export function playerStatTotals(points: Point[]): Record<string, PlayerStatTotals> {
+  const out: Record<string, PlayerStatTotals> = {};
+  const entry = (id: string): PlayerStatTotals => (out[id] ??= emptyStatTotals());
+
+  for (const p of points) {
+    for (const ev of p.statEvents ?? []) {
+      if (ev.type === "block") entry(ev.playerId).blocks++;
+      else entry(ev.playerId).turnovers++;
+    }
+    const s = p.scoring;
+    if (!s) continue;
+    if (s.kind === "callahan") {
+      entry(s.playerId).callahans++;
+    } else {
+      entry(s.goalPlayerId).goals++;
+      if (s.assistPlayerId) entry(s.assistPlayerId).assists++;
+    }
+  }
+  return out;
+}
+
+/**
  * Per-player points played and +/- split by the side each point started on:
  * a count plus a net (+1 for a point their team won, -1 for one it lost) for
  * O-starting and D-starting points each. Same counting convention as

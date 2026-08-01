@@ -14,7 +14,10 @@ import {
   type OD,
   type PointResult,
   type SavedLine,
+  type Scoring,
   type SituationTag,
+  type StatEvent,
+  type StatEventType,
 } from "@shared/game-rules";
 import type { LiveGame } from "@/lib/game/useLiveGame";
 import { isRosterActive, type RosterSnapshotEntry } from "@/lib/storage/gameLog";
@@ -26,6 +29,7 @@ import {
   roleTag,
   sortRoster,
 } from "@/lib/player-display";
+import { Modal } from "@/components/modal";
 import { LineHistory } from "./game-line-history";
 
 // ── Game clock (§8) ──────────────────────────────────────────────────────────
@@ -1445,7 +1449,9 @@ function SavedLinesBar({
               : `No lines/pods tagged "${tagFilter}" fit this ratio.`}
           </p>
         ) : (
-          <div className="flex flex-wrap gap-2">
+          // items-start so a chip with a "Just played" note doesn't stretch
+          // every other chip in its row to match its height.
+          <div className="flex flex-wrap items-start gap-2">
             {lines.map(({ line, mmp, wmp }) => {
               const isPod = line.playerIds.length < 7;
               const isApplied = appliedIds.has(line.id);
@@ -1455,18 +1461,19 @@ function SavedLinesBar({
                   ? "border-violet-300 bg-violet-50 text-violet-800 dark:border-violet-500/40 dark:bg-violet-500/10 dark:text-violet-300"
                   : "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-300";
               return (
-                <span
+                // The chip *is* the button — an inner button would only cover
+                // its own line of text, leaving the rest of a taller chip
+                // (e.g. one carrying a "Just played" note) dead to the touch.
+                <button
                   key={line.id}
-                  className={`flex flex-col items-start gap-0.5 rounded-lg border py-1 pl-3 pr-3 text-sm ${tone} ${
+                  onClick={() => onApply(line)}
+                  aria-pressed={isApplied}
+                  title={isApplied ? "Tap to remove" : "Tap to apply"}
+                  className={`flex flex-col items-start gap-0.5 rounded-lg border px-3 py-1 text-left text-sm ${tone} ${
                     isApplied ? "ring-2 ring-offset-1 ring-offset-surface ring-current" : ""
                   }`}
                 >
-                  <button
-                    onClick={() => onApply(line)}
-                    aria-pressed={isApplied}
-                    title={isApplied ? "Tap to remove" : "Tap to apply"}
-                    className="flex items-center gap-1.5 font-medium"
-                  >
+                  <span className="flex items-center gap-1.5 font-medium">
                     {isApplied && <span aria-hidden>✓</span>}
                     {line.name}
                     <span className="text-[10px] font-normal opacity-70">
@@ -1475,11 +1482,11 @@ function SavedLinesBar({
                       {" · "}
                       {mmp}M/{wmp}W · {line.useCount ?? 0}×
                     </span>
-                  </button>
+                  </span>
                   {line.id === justPlayedId && (
                     <span className="text-[10px] font-medium opacity-80">Just played</span>
                   )}
-                </span>
+                </button>
               );
             })}
           </div>
@@ -1567,18 +1574,39 @@ function InProgressControls({
   const currentLine = sortRoster(
     roster.filter((p) => state.currentLineup.includes(p.playerId)),
   );
-  const pointStartedAt = points.find((p) => p.result === undefined)?.startedAt;
+  const currentPoint = points.find((p) => p.result === undefined);
+  const pointStartedAt = currentPoint?.startedAt;
+  const [scoringOpen, setScoringOpen] = useState(false);
 
   return (
     <div className="space-y-4">
       <PointClock startedAt={pointStartedAt} />
 
       <div className="grid grid-cols-2 gap-3">
-        <ScoreButton label="We scored ▸" onClick={() => actions.recordResult("us")} tone="emerald" />
+        {/* "We scored" opens the goal/Callahan modal, which is what actually
+            records the result — "they scored" has no detail to capture. */}
+        <ScoreButton label="We scored ▸" onClick={() => setScoringOpen(true)} tone="emerald" />
         <ScoreButton label="They scored ▸" onClick={() => actions.recordResult("them")} tone="neutral" />
       </div>
+      {scoringOpen && (
+        <ScoringModal
+          players={currentLine}
+          onClose={() => setScoringOpen(false)}
+          onRecord={(scoring) => {
+            setScoringOpen(false);
+            actions.recordResult("us", scoring);
+          }}
+        />
+      )}
 
       <CurrentLineDisplay players={currentLine} />
+
+      <StatRecorder
+        players={currentLine}
+        events={currentPoint?.statEvents ?? []}
+        onAdd={actions.addStatEvent}
+        onRemove={actions.removeStatEvent}
+      />
 
       <InjuryFlow live={live} />
 
@@ -1601,6 +1629,236 @@ function InProgressControls({
         />
       </div>
     </div>
+  );
+}
+
+// ── Recorded stats (§ stats) ────────────────────────────────────────────────
+
+const STAT_LABEL: Record<StatEventType, string> = {
+  block: "Defensive block",
+  turnover: "Turnover",
+};
+
+const STAT_TONE: Record<StatEventType, string> = {
+  block: "border-blue-300 bg-blue-50 text-blue-800 dark:border-blue-500/40 dark:bg-blue-500/10 dark:text-blue-300",
+  turnover:
+    "border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-300",
+};
+
+/** Ds and turnovers for the point being played. Each tap opens a picker of
+ *  whoever's actually on the field; recorded events are listed underneath so
+ *  a mis-tap can be removed individually (the "edit" path). */
+function StatRecorder({
+  players,
+  events,
+  onAdd,
+  onRemove,
+}: {
+  players: RosterSnapshotEntry[];
+  events: StatEvent[];
+  onAdd: (playerId: string, type: StatEventType) => void;
+  onRemove: (eventId: string) => void;
+}) {
+  const [picking, setPicking] = useState<StatEventType | null>(null);
+  const nameOf = (playerId: string) => {
+    const p = players.find((x) => x.playerId === playerId);
+    return p ? displayName(p) : "Unknown";
+  };
+
+  return (
+    <div className="space-y-2 rounded-lg border border-line p-2">
+      <p className="text-xs font-medium uppercase tracking-wide text-faint">
+        Record statistics
+      </p>
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          onClick={() => setPicking("block")}
+          className={`rounded-md border px-3 py-2 text-sm font-medium ${STAT_TONE.block}`}
+        >
+          Defensive block
+        </button>
+        <button
+          onClick={() => setPicking("turnover")}
+          className={`rounded-md border px-3 py-2 text-sm font-medium ${STAT_TONE.turnover}`}
+        >
+          Turnover
+        </button>
+      </div>
+
+      {events.length > 0 && (
+        <ul className="space-y-1">
+          {events.map((ev) => (
+            <li
+              key={ev.id}
+              className="flex items-center justify-between gap-2 text-sm"
+            >
+              <span>
+                <span
+                  className={`mr-1.5 rounded border px-1 text-[10px] font-semibold uppercase ${STAT_TONE[ev.type]}`}
+                >
+                  {ev.type === "block" ? "D" : "T"}
+                </span>
+                {nameOf(ev.playerId)}
+              </span>
+              <button
+                onClick={() => onRemove(ev.id)}
+                aria-label={`Remove ${STAT_LABEL[ev.type]} for ${nameOf(ev.playerId)}`}
+                className="shrink-0 rounded px-2 py-0.5 text-xs text-muted hover:text-fg"
+              >
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {picking && (
+        <PlayerPickerModal
+          title={STAT_LABEL[picking]}
+          players={players}
+          onClose={() => setPicking(null)}
+          onPick={(playerId) => {
+            setPicking(null);
+            onAdd(playerId, picking);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Pick one of the players on the field. Used for Ds, turnovers, and each
+ *  half of the goal/assist pair. */
+function PlayerPickerModal({
+  title,
+  players,
+  onClose,
+  onPick,
+  hint,
+}: {
+  title: string;
+  players: RosterSnapshotEntry[];
+  onClose: () => void;
+  onPick: (playerId: string) => void;
+  hint?: string;
+}) {
+  return (
+    <Modal onClose={onClose}>
+      <h2 className="font-medium">{title}</h2>
+      {hint && <p className="text-sm text-muted">{hint}</p>}
+      <ul className="grid grid-cols-2 gap-1.5">
+        {players.map((p) => (
+          <li key={p.playerId}>
+            <button
+              onClick={() => onPick(p.playerId)}
+              className="w-full rounded-md border border-line px-2 py-2 text-left text-sm hover:border-line-strong"
+            >
+              <span
+                className={`mr-1 rounded px-1 text-[10px] font-medium ${ROLE_BADGE_COLOR[p.role]}`}
+              >
+                {roleTag(p.role)}
+              </span>
+              {displayName(p)}
+            </button>
+          </li>
+        ))}
+      </ul>
+      <button
+        onClick={onClose}
+        className="w-full rounded-md border border-line-strong px-3 py-1.5 text-sm"
+      >
+        Cancel
+      </button>
+    </Modal>
+  );
+}
+
+/** Captures how we scored, on the way to recording the point. Every path ends
+ *  in the point being recorded — including "Skip", so a coach who doesn't
+ *  care about per-player credit isn't blocked from banking the score. */
+function ScoringModal({
+  players,
+  onClose,
+  onRecord,
+}: {
+  players: RosterSnapshotEntry[];
+  onClose: () => void;
+  onRecord: (scoring?: Scoring) => void;
+}) {
+  const [step, setStep] = useState<"kind" | "assist" | "goal" | "callahan">("kind");
+  const [assistPlayerId, setAssistPlayerId] = useState<string | undefined>();
+
+  if (step === "assist") {
+    return (
+      <PlayerPickerModal
+        title="Who threw the assist?"
+        hint="Skip if the goal came off a turnover with no completed pass."
+        players={players}
+        onClose={onClose}
+        onPick={(id) => {
+          setAssistPlayerId(id);
+          setStep("goal");
+        }}
+      />
+    );
+  }
+  if (step === "goal") {
+    return (
+      <PlayerPickerModal
+        title="Who caught the goal?"
+        players={players}
+        onClose={onClose}
+        onPick={(goalPlayerId) =>
+          onRecord({ kind: "goal", assistPlayerId, goalPlayerId })
+        }
+      />
+    );
+  }
+  if (step === "callahan") {
+    return (
+      <PlayerPickerModal
+        title="Who caught the Callahan?"
+        players={players}
+        onClose={onClose}
+        onPick={(playerId) => onRecord({ kind: "callahan", playerId })}
+      />
+    );
+  }
+
+  return (
+    <Modal onClose={onClose}>
+      <h2 className="font-medium">How did we score?</h2>
+      <div className="grid gap-2">
+        <button
+          onClick={() => setStep("assist")}
+          className="rounded-md border border-line px-3 py-2.5 text-left text-sm hover:border-line-strong"
+        >
+          <span className="font-medium">Goal</span>
+          <span className="block text-xs text-muted">Record the assist and the score</span>
+        </button>
+        <button
+          onClick={() => setStep("callahan")}
+          className="rounded-md border border-line px-3 py-2.5 text-left text-sm hover:border-line-strong"
+        >
+          <span className="font-medium">Callahan</span>
+          <span className="block text-xs text-muted">Blocked and caught in their end zone</span>
+        </button>
+      </div>
+      <div className="flex gap-2">
+        <button
+          onClick={onClose}
+          className="flex-1 rounded-md border border-line-strong px-3 py-1.5 text-sm"
+        >
+          Cancel
+        </button>
+        <button
+          onClick={() => onRecord(undefined)}
+          className="flex-1 rounded-md border border-line-strong px-3 py-1.5 text-sm"
+        >
+          Skip detail
+        </button>
+      </div>
+    </Modal>
   );
 }
 

@@ -11,7 +11,14 @@ import {
   editPointLineup,
   undoLastPoint,
   redoAction,
+  addStatEvent,
+  removeStatEvent,
 } from "./state";
+import {
+  defensiveEfficiency,
+  offensiveEfficiency,
+  playerStatTotals,
+} from "./rules";
 import type { Game, GameLogState, PointResult } from "./types";
 
 // A 13-cap mixed game: half at 7, starting O, ratio A = 4MMP_3WMP, 2 timeouts/half.
@@ -343,5 +350,96 @@ describe("edit line history", () => {
     expect(live.ourScore).toBe(1); // unchanged
     expect(live.pointsPlayed["g"]).toBeUndefined();
     expect(live.pointsPlayed["h"]).toBe(1);
+  });
+});
+
+describe("recorded stats", () => {
+  const lineup = ["a", "b", "c", "d", "e", "f", "g"];
+
+  test("credits a D and a turnover to players on the field", () => {
+    let s = confirmLine(game, fresh(), lineup, "pt-1");
+    s = addStatEvent(s, { id: "e1", playerId: "a", type: "block" });
+    s = addStatEvent(s, { id: "e2", playerId: "b", type: "turnover" });
+
+    const totals = playerStatTotals(s.points);
+    expect(totals["a"]!.blocks).toBe(1);
+    expect(totals["b"]!.turnovers).toBe(1);
+  });
+
+  test("rejects a player who isn't on the field", () => {
+    const s = confirmLine(game, fresh(), lineup, "pt-1");
+    expect(() =>
+      addStatEvent(s, { id: "e1", playerId: "z", type: "block" }),
+    ).toThrow("not on the field");
+  });
+
+  test("accepts a player subbed in for an injury, and rejects the one subbed out", () => {
+    let s = confirmLine(game, fresh(), lineup, "pt-1");
+    s = injurySub(s, "a", "sub");
+    s = addStatEvent(s, { id: "e1", playerId: "sub", type: "block" });
+    expect(playerStatTotals(s.points)["sub"]!.blocks).toBe(1);
+    expect(() =>
+      addStatEvent(s, { id: "e2", playerId: "a", type: "block" }),
+    ).toThrow("not on the field");
+  });
+
+  test("removes a single mis-recorded event and ignores unknown ids", () => {
+    let s = confirmLine(game, fresh(), lineup, "pt-1");
+    s = addStatEvent(s, { id: "e1", playerId: "a", type: "block" });
+    s = addStatEvent(s, { id: "e2", playerId: "a", type: "block" });
+    s = removeStatEvent(s, "e1");
+    expect(playerStatTotals(s.points)["a"]!.blocks).toBe(1);
+    s = removeStatEvent(s, "nope");
+    expect(playerStatTotals(s.points)["a"]!.blocks).toBe(1);
+  });
+
+  test("records a goal with its assist, and survives undo/redo", () => {
+    let s = confirmLine(game, fresh(), lineup, "pt-1");
+    s = recordResult(game, s, "us", undefined, {
+      kind: "goal",
+      assistPlayerId: "a",
+      goalPlayerId: "b",
+    });
+    let totals = playerStatTotals(s.points);
+    expect(totals["a"]!.assists).toBe(1);
+    expect(totals["b"]!.goals).toBe(1);
+
+    const undone = undoLastPoint(game, s);
+    expect(undone.points[0]!.scoring).toBeUndefined();
+
+    const redone = redoAction(game, undone, undone.redo);
+    totals = playerStatTotals(redone.points);
+    expect(totals["a"]!.assists).toBe(1);
+    expect(totals["b"]!.goals).toBe(1);
+  });
+
+  test("a Callahan counts only as a Callahan, not also a goal or a block", () => {
+    let s = confirmLine(game, fresh(), lineup, "pt-1");
+    s = recordResult(game, s, "us", undefined, { kind: "callahan", playerId: "c" });
+    const totals = playerStatTotals(s.points)["c"]!;
+    expect(totals.callahans).toBe(1);
+    expect(totals.goals).toBe(0);
+    expect(totals.blocks).toBe(0);
+  });
+
+  test("drops scoring detail if it's paired with a point the opponent won", () => {
+    let s = confirmLine(game, fresh(), lineup, "pt-1");
+    s = recordResult(game, s, "them", undefined, {
+      kind: "goal",
+      goalPlayerId: "b",
+    });
+    expect(s.points[0]!.scoring).toBeUndefined();
+  });
+});
+
+describe("efficiency", () => {
+  test("O% and D% divide by their own side's points, and are null with none", () => {
+    const none = { holds: 0, broken: 0, breaks: 0, opponentHolds: 0 };
+    expect(offensiveEfficiency(none)).toBeNull();
+    expect(defensiveEfficiency(none)).toBeNull();
+
+    const played = { holds: 3, broken: 1, breaks: 1, opponentHolds: 3 };
+    expect(offensiveEfficiency(played)).toBe(0.75);
+    expect(defensiveEfficiency(played)).toBe(0.25);
   });
 });
