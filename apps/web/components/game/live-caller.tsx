@@ -1158,7 +1158,7 @@ function RosterColumn({
                   >
                     {justPlayedIds.has(p.playerId)
                       ? "Just played"
-                      : `Last played ${benchGap[p.playerId] ?? 0} points ago`}
+                      : `Last played ${benchGap[p.playerId] ?? 0} pts ago`}
                   </span>
                 </span>
                 <span className="flex shrink-0 flex-col items-end text-[10px] text-faint">
