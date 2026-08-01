@@ -548,7 +548,7 @@ function ToggleButton({
   );
 }
 
-const COLUMN_TONE = {
+export const COLUMN_TONE = {
   sky: {
     header: "text-sky-600 dark:text-sky-400",
     idle: "border-sky-200 dark:border-sky-500/30",
@@ -561,7 +561,7 @@ const COLUMN_TONE = {
   },
 } as const;
 
-function PlayerColumn({
+export function PlayerColumn({
   label,
   tone,
   players,

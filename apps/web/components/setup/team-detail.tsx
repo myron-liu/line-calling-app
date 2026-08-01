@@ -290,12 +290,20 @@ function Roster({
         <h2 className="font-medium">
           Roster <span className="text-faint">({players.length})</span>
         </h2>
-        <button
-          onClick={() => setAdding(true)}
-          className="rounded bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white"
-        >
-          Add player
-        </button>
+        <div className="flex items-center gap-3">
+          <Link
+            href={`/teams/${teamId}/tags`}
+            className="text-xs font-medium text-emerald-700 dark:text-emerald-400"
+          >
+            Tags →
+          </Link>
+          <button
+            onClick={() => setAdding(true)}
+            className="rounded bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white"
+          >
+            Add player
+          </button>
+        </div>
       </div>
 
       {players.length === 0 ? (
