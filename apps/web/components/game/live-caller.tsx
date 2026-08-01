@@ -677,6 +677,19 @@ function LineBuilder({
 
   return (
     <div className="space-y-3">
+      {/* Only worth offering once there's actually a line to look back at —
+          any point with a lineup counts, including one still being played. */}
+      {points.length > 0 && (
+        <Link
+          href={`/games/${game.id}/history`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-block rounded-md border border-line-strong px-3 py-1.5 text-sm"
+        >
+          Line history ↗
+        </Link>
+      )}
+
       <SavedLinesBar
         lines={visibleQuickLines}
         appliedIds={appliedLineIds}
@@ -1691,7 +1704,7 @@ function InjuryFlow({ live }: { live: LiveGame }) {
 // ── Secondary controls (always available) ────────────────────────────────────────
 
 function SecondaryControls({ live }: { live: LiveGame }) {
-  const { game, state, actions, canUndo, canRedo, undoLabel, redoLabel, points } = live;
+  const { state, actions, canUndo, canRedo, undoLabel, redoLabel, points } = live;
   const [undoingFlip, setUndoingFlip] = useState(false);
   const [flipError, setFlipError] = useState<string | null>(null);
 
@@ -1736,14 +1749,6 @@ function SecondaryControls({ live }: { live: LiveGame }) {
           />
         )}
         <SmallButton label="End game" onClick={actions.endGame} />
-        <Link
-          href={`/games/${game.id}/history`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="rounded-md border border-line-strong px-3 py-1.5"
-        >
-          Line history ↗
-        </Link>
       </div>
       {flipError && <p className="text-xs text-red-600 dark:text-red-400">{flipError}</p>}
     </div>

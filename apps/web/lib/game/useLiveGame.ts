@@ -33,6 +33,7 @@ import {
   readLastSyncedAt,
   readLog,
   readMeta,
+  readPendingReplay,
   readRosterSnapshot,
   registerGame,
   setRosterInjured,
@@ -210,23 +211,29 @@ export function useLiveGame(gameId: string): LiveGameResult {
     lastSyncedAt: null,
   });
   // A lineup selected in the line-history viewer, which opens in its own tab
-  // (see game-line-history.tsx) — that tab has no other way to reach this
-  // one, so it signals via localStorage and this listens for the native
-  // `storage` event, which only ever fires in *other* same-origin tabs.
-  // `nonce` changes on every signal (even a repeated identical lineup) so the
-  // live caller's effect reliably re-fires and applies it to whichever line
-  // builder is currently open.
+  // (see game-line-history.tsx). It hands the lineup over through
+  // localStorage and is picked up two ways, because either tab can be the one
+  // showing the caller when it lands: on mount (the viewer navigates itself
+  // back here after queuing, and a tab never receives its own storage
+  // events), and via the native `storage` event (the tab the viewer was
+  // opened *from* is still sitting on this game). `nonce` changes on every
+  // signal — even a repeated identical lineup — so the line builder's effect
+  // reliably re-fires either way.
   const [replaySeed, setReplaySeed] = useState<{ nonce: number; lineup: string[] } | null>(
     null,
   );
   useEffect(() => {
     const replayKey = keys.gameReplay(gameId);
+    const consume = (lineup: string[]) => {
+      setReplaySeed({ nonce: Date.now(), lineup });
+      clearPendingReplay(gameId);
+    };
+    const queued = readPendingReplay(gameId);
+    if (queued) consume(queued);
     const handler = (e: StorageEvent) => {
       if (e.key !== replayKey || !e.newValue) return;
       try {
-        const lineup = JSON.parse(e.newValue) as string[];
-        setReplaySeed({ nonce: Date.now(), lineup });
-        clearPendingReplay(gameId);
+        consume(JSON.parse(e.newValue) as string[]);
       } catch {
         // Malformed value from some other source — ignore rather than crash.
       }

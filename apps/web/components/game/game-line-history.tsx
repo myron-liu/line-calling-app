@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   deriveLiveGameState,
   ratioCounts,
@@ -29,16 +31,17 @@ const defaultMeta = (g: Game): GameMeta => ({
   endedManually: false,
 });
 
-/** Read-only viewer for a live game's completed lines, opened in its own tab
- *  from the live caller so both stay visible at once. It reads the same
- *  localStorage the live tab writes (no server round-trip), and sends a
- *  chosen lineup back to that tab via a `storage`-event signal. */
+/** Read-only viewer for a game's lines, opened in its own tab from the live
+ *  caller so both stay visible at once. It reads the same localStorage the
+ *  live tab writes (no server round-trip); choosing a line queues it there
+ *  and navigates this tab back to the game, so it works whether the coach
+ *  returns to the original tab or just carries on in this one. */
 export function GameLineHistory({ gameId }: { gameId: string }) {
+  const router = useRouter();
   const [game, setGame] = useState<Game | null | undefined>(undefined);
   const [points, setPoints] = useState<Point[]>([]);
   const [meta, setMeta] = useState<GameMeta | null>(null);
   const [roster, setRoster] = useState<RosterSnapshotEntry[]>([]);
-  const [queuedPointId, setQueuedPointId] = useState<string | null>(null);
 
   const load = useCallback(() => {
     const g = readGameConfig(gameId);
@@ -82,9 +85,17 @@ export function GameLineHistory({ gameId }: { gameId: string }) {
   if (game === undefined) return <p className="text-muted">Loading…</p>;
   if (game === null) {
     return (
-      <p className="py-8 text-center text-muted">
-        No local data for this game — open it in the live caller first.
-      </p>
+      <div className="space-y-3 py-8 text-center">
+        <p className="text-muted">
+          No local data for this game — open it in the live caller first.
+        </p>
+        <Link
+          href={`/games/${gameId}`}
+          className="text-sm text-emerald-700 underline dark:text-emerald-400"
+        >
+          Back to the game
+        </Link>
+      </div>
     );
   }
 
@@ -92,7 +103,7 @@ export function GameLineHistory({ gameId }: { gameId: string }) {
 
   // Which point a replayed line would actually be used for: the one being
   // built right now, or — while a point is still playing out — the next one,
-  // since that's the LineBuilder the live tab has open (its "prepare next
+  // since that's the LineBuilder the live caller has open (its "prepare next
   // line" panel). The gender ratio to filter against follows from that.
   const targetPointNumber =
     state.phase === "point_in_progress"
@@ -103,15 +114,20 @@ export function GameLineHistory({ gameId }: { gameId: string }) {
     : undefined;
   const need = targetRatio ? ratioCounts(targetRatio) : null;
 
-  const completed = points.filter((p) => p.result !== undefined);
-
-  const replay = (point: Point) => {
+  const use = (point: Point) => {
     writePendingReplay(gameId, point.lineup);
-    setQueuedPointId(point.id);
+    router.push(`/games/${gameId}`);
   };
 
   return (
     <section className="space-y-4">
+      <Link
+        href={`/games/${gameId}`}
+        className="inline-flex items-center gap-1 text-sm text-muted hover:text-fg"
+      >
+        <span aria-hidden>←</span> Back to the game
+      </Link>
+
       <div className="space-y-1">
         <h1 className="text-xl font-semibold">Line history</h1>
         <p className="text-sm text-muted">
@@ -120,16 +136,16 @@ export function GameLineHistory({ gameId }: { gameId: string }) {
           {need ? ` · ${need.mmp} MMP / ${need.wmp} WMP` : ""}
         </p>
         <p className="text-xs text-faint">
-          Choosing a line loads it into this game&apos;s line builder in the
-          tab you came from. Keep that tab open.
+          Choosing a line loads it into the line builder and takes you back to
+          the game.
         </p>
       </div>
 
-      {completed.length === 0 ? (
-        <p className="text-sm text-muted">No completed points yet.</p>
+      {points.length === 0 ? (
+        <p className="text-sm text-muted">No lines yet.</p>
       ) : (
         <ul className="space-y-2">
-          {completed
+          {points
             .slice()
             .reverse()
             .map((point) => (
@@ -139,8 +155,7 @@ export function GameLineHistory({ gameId }: { gameId: string }) {
                 byId={byId}
                 eligibleIds={eligibleIds}
                 need={need}
-                queued={queuedPointId === point.id}
-                onReplay={() => replay(point)}
+                onUse={() => use(point)}
               />
             ))}
         </ul>
@@ -149,21 +164,50 @@ export function GameLineHistory({ gameId }: { gameId: string }) {
   );
 }
 
+/** What the point's starting side plus its result add up to, in the terms a
+ *  coach actually thinks in: starting on D and scoring is a break, starting
+ *  on O and conceding is getting broken, and the other two are holds. */
+function outcome(point: Point): {
+  label: string;
+  tone: string;
+} | null {
+  if (point.result === undefined) return null;
+  const weScored = point.result === "us";
+  if (point.od === "D") {
+    return weScored
+      ? {
+          label: "Break",
+          tone: "bg-emerald-600 text-white",
+        }
+      : {
+          label: "They held",
+          tone: "bg-neutral-200 text-neutral-700 dark:bg-neutral-700 dark:text-neutral-200",
+        };
+  }
+  return weScored
+    ? {
+        label: "Hold",
+        tone: "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-300",
+      }
+    : {
+        label: "Broken",
+        tone: "bg-red-600 text-white",
+      };
+}
+
 function HistoryRow({
   point,
   byId,
   eligibleIds,
   need,
-  queued,
-  onReplay,
+  onUse,
 }: {
   point: Point;
   byId: Map<string, RosterSnapshotEntry>;
   eligibleIds: Set<string>;
   /** Null for a non-mixed game: any lineup is ratio-viable. */
   need: { mmp: number; wmp: number } | null;
-  queued: boolean;
-  onReplay: () => void;
+  onUse: () => void;
 }) {
   const players = sortRoster(
     point.lineup.map((id) => byId.get(id)).filter((p): p is RosterSnapshotEntry => !!p),
@@ -178,31 +222,44 @@ function HistoryRow({
   const ratioOk = !need || (mmp === need.mmp && wmp === need.wmp);
   const viable = allAvailable && ratioOk;
 
-  const won = point.result === "us";
+  const inProgress = point.result === undefined;
+  const result = outcome(point);
   return (
-    <li className={`rounded-lg border border-line p-2.5 ${viable ? "" : "opacity-60"}`}>
+    <li
+      className={`rounded-lg border p-2.5 ${
+        inProgress ? "border-emerald-400 dark:border-emerald-500/50" : "border-line"
+      } ${viable ? "" : "opacity-60"}`}
+    >
       <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 text-sm">
+        <div className="flex flex-wrap items-center gap-2 text-sm">
           <span className="font-medium">Point {point.pointNumber}</span>
           <span
-            className={`rounded px-1.5 py-0.5 text-xs font-medium ${
-              won
-                ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-300"
-                : "bg-neutral-200 text-neutral-700 dark:bg-neutral-700 dark:text-neutral-200"
+            className={`rounded px-1.5 py-0.5 text-xs font-semibold text-white ${
+              point.od === "O" ? "bg-red-600" : "bg-blue-600"
             }`}
           >
-            {won ? "Scored" : "Conceded"}
+            Started {point.od}
           </span>
+          {result && (
+            <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${result.tone}`}>
+              {result.label}
+            </span>
+          )}
+          {inProgress && (
+            <span className="rounded px-1.5 py-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-400">
+              On the field now
+            </span>
+          )}
           <span className="text-xs text-faint">
-            {point.od} · {mmp}M/{wmp}W
+            {mmp}M/{wmp}W
           </span>
         </div>
         <button
-          onClick={onReplay}
-          disabled={!viable || queued}
+          onClick={onUse}
+          disabled={!viable}
           className="shrink-0 rounded-md border border-line-strong px-2.5 py-1 text-sm disabled:opacity-40"
         >
-          {queued ? "Sent ✓" : "Use line"}
+          Use line
         </button>
       </div>
       <p className="mt-1 text-sm">

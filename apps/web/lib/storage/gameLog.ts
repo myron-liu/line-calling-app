@@ -121,6 +121,13 @@ export function writePendingReplay(gameId: string, lineup: string[]): WriteResul
   return write(keys.gameReplay(gameId), lineup);
 }
 
+/** Also read on the live caller's own mount, not just via the `storage`
+ *  event — the viewer navigates *itself* back to the game after queuing a
+ *  lineup, and a tab never receives its own storage events. */
+export function readPendingReplay(gameId: string): string[] | null {
+  return read<string[] | null>(keys.gameReplay(gameId), null);
+}
+
 /** Best-effort cleanup after the live tab consumes a replay signal — not
  *  required for correctness (each new replay is a genuine value change
  *  either way), just avoids a stale queued lineup lingering indefinitely. */
