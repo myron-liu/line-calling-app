@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { Division, GameCapMode, Player } from "@shared/game-rules";
+import type { Division, Game, GameCapMode, Player } from "@shared/game-rules";
 import { createGame, rosterSnapshot } from "@/lib/storage/games";
 
 // Create-game form, shared by individual games (pick a subset of the team roster)
@@ -17,6 +17,7 @@ export function CreateGameForm({
   selectable,
   tournamentStartDate,
   tournamentEndDate,
+  existingGames,
 }: {
   teamId: string;
   tournamentId?: string;
@@ -30,6 +31,8 @@ export function CreateGameForm({
    *  tournament's date range. */
   tournamentStartDate?: string;
   tournamentEndDate?: string;
+  /** Games already scheduled in this tournament, for the duplicate check. */
+  existingGames?: Game[];
 }) {
   const router = useRouter();
   const isMixed = division === "mixed";
@@ -68,6 +71,19 @@ export function CreateGameForm({
     ((tournamentStartDate !== undefined && gameDate < tournamentStartDate) ||
       (tournamentEndDate !== undefined && gameDate > tournamentEndDate));
 
+  // Same opponent, day and start time is a double-submit, not a schedule. A
+  // real rematch (pool play then bracket) is told apart by its start time,
+  // which is what the warning points at. Mirrors the server's own rule.
+  const duplicate =
+    opponent.trim() !== "" &&
+    gameDate !== "" &&
+    (existingGames ?? []).some(
+      (g) =>
+        g.opponentName.trim().toLowerCase() === opponent.trim().toLowerCase() &&
+        g.gameDate === gameDate &&
+        (g.startTime ?? "") === startTime.trim(),
+    );
+
   const toggle = (id: string) =>
     setSelected((cur) => {
       const next = new Set(cur);
@@ -79,7 +95,7 @@ export function CreateGameForm({
   const [error, setError] = useState<string | null>(null);
 
   const submit = async () => {
-    if (gameDateInvalid) return;
+    if (gameDateInvalid || duplicate || creating) return;
     const roster = rosterSnapshot(chosen, injuredIds ?? new Set());
     setCreating(true);
     setError(null);
@@ -233,12 +249,18 @@ export function CreateGameForm({
           {tournamentEndDate ? ` – ${tournamentEndDate}` : ""}).
         </p>
       )}
+      {duplicate && (
+        <p className="text-xs text-amber-600 dark:text-amber-400">
+          A game against {opponent.trim()} on {gameDate} already exists. Set a
+          start time to schedule a second one.
+        </p>
+      )}
       {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
 
       <div className="flex gap-2">
         <button
           onClick={submit}
-          disabled={!enoughPlayers || gameDateInvalid || creating}
+          disabled={!enoughPlayers || gameDateInvalid || duplicate || creating}
           className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white disabled:bg-disabled"
         >
           {creating ? "Creating…" : "Create game"}

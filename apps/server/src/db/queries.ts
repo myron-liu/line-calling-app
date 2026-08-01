@@ -72,11 +72,34 @@ export async function getTeam(id: string): Promise<Team | null> {
   return row ? toTeam(row) : null;
 }
 
-export async function createTeam(input: {
-  id: string;
-  name: string;
-  division: Division;
-}): Promise<Team> {
+/** Names are compared case- and whitespace-insensitively for duplicate
+ *  detection — "Revolver" and "revolver " are the same team to a human, and
+ *  a coach who fat-fingers a second one wants to be told, not to end up with
+ *  two. */
+export const normalizeName = (name: string): string => name.trim().toLowerCase();
+
+/**
+ * Thrown when a create would duplicate something that already exists. The
+ * routes layer turns this into a 409 with this message, which the UI shows
+ * verbatim — so the message has to read as advice to a coach, not a stack
+ * trace.
+ *
+ * This is the backstop for a double-tapped button: the UI disables the
+ * control while a create is in flight, but two requests already racing on a
+ * slow connection can only be caught here.
+ */
+export class DuplicateError extends Error {}
+
+export async function createTeam(
+  input: { id: string; name: string; division: Division },
+  managerPhone: string,
+): Promise<Team> {
+  // Scoped to this manager's own teams: two unrelated clubs are perfectly
+  // entitled to both be called "Revolver".
+  const mine = await listTeamsForManager(managerPhone);
+  if (mine.some((t) => normalizeName(t.name) === normalizeName(input.name))) {
+    throw new DuplicateError(`You already have a team called "${input.name.trim()}".`);
+  }
   const [row] = await db
     .insert(teams)
     .values({ id: input.id, name: input.name, division: input.division })
@@ -225,6 +248,12 @@ export async function createPlayer(
   teamId: string,
   input: PlayerInput,
 ): Promise<Player> {
+  const roster = await listPlayers(teamId);
+  if (roster.some((p) => normalizeName(p.name) === normalizeName(input.name))) {
+    throw new DuplicateError(
+      `${input.name.trim()} is already on this roster. Use a nickname to tell two players with the same name apart.`,
+    );
+  }
   const [row] = await db
     .insert(players)
     .values({
@@ -326,6 +355,20 @@ export async function createTournament(input: {
   startDate: string;
   endDate?: string;
 }): Promise<Tournament> {
+  // Same name *and* same start date — a club that runs "Sectionals" every
+  // year should still be able to add this year's.
+  const existing = await listTournaments(input.teamId);
+  if (
+    existing.some(
+      (t) =>
+        normalizeName(t.name) === normalizeName(input.name) &&
+        t.startDate === input.startDate,
+    )
+  ) {
+    throw new DuplicateError(
+      `"${input.name.trim()}" already exists starting ${input.startDate}.`,
+    );
+  }
   const [row] = await db
     .insert(tournaments)
     .values({
@@ -783,6 +826,23 @@ export async function createGame(input: CreateGameInput): Promise<GameFull> {
         (tournament.endDate && input.gameDate > tournament.endDate))
     ) {
       throw new Error("Game date must fall within the tournament's date range");
+    }
+
+    // Same opponent, same day, same start time is a double-submit, not a
+    // schedule — a genuine rematch (pool play then bracket) is distinguished
+    // by its start time, which the message points the coach at.
+    const scheduled = await listTournamentGames(input.tournamentId);
+    if (
+      scheduled.some(
+        (g) =>
+          normalizeName(g.opponentName) === normalizeName(input.opponentName) &&
+          g.gameDate === input.gameDate &&
+          (g.startTime ?? "") === (input.startTime ?? ""),
+      )
+    ) {
+      throw new DuplicateError(
+        `A game against ${input.opponentName.trim()} on ${input.gameDate} already exists. Set a start time to schedule a second one.`,
+      );
     }
   }
   const [row] = await db

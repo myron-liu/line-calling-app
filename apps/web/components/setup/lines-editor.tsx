@@ -29,6 +29,7 @@ import {
   sortRoster,
 } from "@/lib/player-display";
 import { Modal } from "@/components/modal";
+import { useSubmit } from "@/lib/use-submit";
 
 // Build/edit reusable lines (7) and pods (1-6), reached from the tournament
 // page. Saved lines are tournament-scoped (§4.3) so they show up in the live
@@ -49,6 +50,7 @@ export function LinesEditor({ tournamentId }: { tournamentId: string }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<SavedLine | null>(null);
   const [activeTagFilters, setActiveTagFilters] = useState<Set<string>>(new Set());
+  const { submitting, error: saveError, submit } = useSubmit();
 
   useEffect(() => {
     findTournament(tournamentId).then((t) => {
@@ -167,22 +169,23 @@ export function LinesEditor({ tournamentId }: { tournamentId: string }) {
   const toggleSituationTag = (t: string) =>
     setTags((cur) => (cur.includes(t) ? cur.filter((x) => x !== t) : [...cur, t]));
 
-  const save = async () => {
-    if (!name.trim() || selected.length === 0) return;
-    if (editingId) {
-      await updateSavedLine(editingId, {
-        name: name.trim(),
-        playerIds: selected,
-        color,
-        side,
-        tags,
-      });
-    } else {
-      await createSavedLine(tournamentId, name.trim(), selected, { color, side, tags });
-    }
-    refresh();
-    resetBuilder();
-  };
+  const save = () =>
+    submit(async () => {
+      if (!name.trim() || selected.length === 0) return;
+      if (editingId) {
+        await updateSavedLine(editingId, {
+          name: name.trim(),
+          playerIds: selected,
+          color,
+          side,
+          tags,
+        });
+      } else {
+        await createSavedLine(tournamentId, name.trim(), selected, { color, side, tags });
+      }
+      refresh();
+      resetBuilder();
+    });
 
   const confirmRemove = async () => {
     if (!deleting) return;
@@ -199,7 +202,13 @@ export function LinesEditor({ tournamentId }: { tournamentId: string }) {
   };
 
   const { mmp, wmp } = composition(selected);
-  const canSave = name.trim().length > 0 && selected.length > 0;
+  // A name already in use by a *different* line/pod: the server merges rather
+  // than duplicating (see createSavedLine), so say so up front instead of
+  // letting the coach think they made a new one.
+  const nameTaken =
+    !editingId &&
+    lines.some((l) => l.name.trim().toLowerCase() === name.trim().toLowerCase());
+  const canSave = name.trim().length > 0 && selected.length > 0 && !nameTaken;
 
   return (
     <section className="space-y-6">
@@ -369,13 +378,23 @@ export function LinesEditor({ tournamentId }: { tournamentId: string }) {
           </div>
         )}
 
+        {nameTaken && (
+          <p className="text-xs text-amber-600 dark:text-amber-400">
+            A line or pod called &ldquo;{name.trim()}&rdquo; already exists. Pick
+            another name, or edit that one.
+          </p>
+        )}
+        {saveError && (
+          <p className="text-xs text-red-600 dark:text-red-400">{saveError}</p>
+        )}
+
         <div className="flex gap-2">
           <button
             onClick={save}
-            disabled={!canSave}
+            disabled={!canSave || submitting}
             className="rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white disabled:bg-disabled"
           >
-            {editingId ? "Save changes" : "Create"}
+            {submitting ? "Saving…" : editingId ? "Save changes" : "Create"}
           </button>
           {selected.length > 0 && (
             <button

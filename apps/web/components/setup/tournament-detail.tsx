@@ -252,6 +252,7 @@ export function TournamentDetail({ tournamentId }: { tournamentId: string }) {
             selectable={false}
             tournamentStartDate={tournament.startDate}
             tournamentEndDate={tournament.endDate}
+            existingGames={games}
           />
         ) : (
           <p className="text-sm text-muted">

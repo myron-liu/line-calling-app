@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   SITUATION_TAGS,
   genderStateLabel,
@@ -1507,14 +1507,22 @@ function SaveLineButton({
   selectedCount: number;
   onSave: (name: string) => void;
 }) {
-  const [saving, setSaving] = useState(false);
+  // `naming` is the "name input is open" toggle, not an in-flight flag —
+  // actions.saveLine is fire-and-forget by design (best-effort on a sideline).
+  // `submitted` is the double-tap guard: it's a ref because two taps in the
+  // same frame both read the pre-render state.
+  const [naming, setNaming] = useState(false);
+  const submitted = useRef(false);
   const [name, setName] = useState("");
   const canSave = selectedCount >= 1 && selectedCount <= 7;
 
-  if (!saving) {
+  if (!naming) {
     return (
       <button
-        onClick={() => setSaving(true)}
+        onClick={() => {
+          submitted.current = false;
+          setNaming(true);
+        }}
         disabled={!canSave}
         className="w-full rounded-lg border border-dashed border-line-strong py-2 text-sm font-medium text-muted disabled:opacity-40"
       >
@@ -1534,9 +1542,11 @@ function SaveLineButton({
       />
       <button
         onClick={() => {
+          if (submitted.current) return;
+          submitted.current = true;
           onSave(name.trim() || (selectedCount === 7 ? "Line" : "Pod"));
           setName("");
-          setSaving(false);
+          setNaming(false);
         }}
         className="rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white"
       >
@@ -1544,7 +1554,7 @@ function SaveLineButton({
       </button>
       <button
         onClick={() => {
-          setSaving(false);
+          setNaming(false);
           setName("");
         }}
         className="rounded-md border border-line-strong px-3 py-1.5 text-sm"
@@ -1734,20 +1744,24 @@ function PlayerPickerModal({
   players,
   onClose,
   onPick,
-  hint,
+  excludePlayerId,
+  dismissLabel = "Cancel",
 }: {
   title: string;
   players: RosterSnapshotEntry[];
+  /** Also what a backdrop click does, so it always matches the button. */
   onClose: () => void;
   onPick: (playerId: string) => void;
-  hint?: string;
+  /** Hidden from the list — the assist thrower can't also catch the goal. */
+  excludePlayerId?: string;
+  dismissLabel?: string;
 }) {
+  const choices = players.filter((p) => p.playerId !== excludePlayerId);
   return (
     <Modal onClose={onClose}>
       <h2 className="font-medium">{title}</h2>
-      {hint && <p className="text-sm text-muted">{hint}</p>}
       <ul className="grid grid-cols-2 gap-1.5">
-        {players.map((p) => (
+        {choices.map((p) => (
           <li key={p.playerId}>
             <button
               onClick={() => onPick(p.playerId)}
@@ -1767,7 +1781,7 @@ function PlayerPickerModal({
         onClick={onClose}
         className="w-full rounded-md border border-line-strong px-3 py-1.5 text-sm"
       >
-        Cancel
+        {dismissLabel}
       </button>
     </Modal>
   );
@@ -1792,9 +1806,9 @@ function ScoringModal({
     return (
       <PlayerPickerModal
         title="Who threw the assist?"
-        hint="Skip if the goal came off a turnover with no completed pass."
         players={players}
-        onClose={onClose}
+        dismissLabel="← Back"
+        onClose={() => setStep("kind")}
         onPick={(id) => {
           setAssistPlayerId(id);
           setStep("goal");
@@ -1807,7 +1821,9 @@ function ScoringModal({
       <PlayerPickerModal
         title="Who caught the goal?"
         players={players}
-        onClose={onClose}
+        excludePlayerId={assistPlayerId}
+        dismissLabel="← Back"
+        onClose={() => setStep("assist")}
         onPick={(goalPlayerId) =>
           onRecord({ kind: "goal", assistPlayerId, goalPlayerId })
         }
@@ -1819,7 +1835,8 @@ function ScoringModal({
       <PlayerPickerModal
         title="Who caught the Callahan?"
         players={players}
-        onClose={onClose}
+        dismissLabel="← Back"
+        onClose={() => setStep("kind")}
         onPick={(playerId) => onRecord({ kind: "callahan", playerId })}
       />
     );

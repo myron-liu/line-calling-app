@@ -38,6 +38,7 @@ import {
   type GameMetadataPatch,
 } from "@/lib/storage/games";
 import { Modal } from "@/components/modal";
+import { useSubmit } from "@/lib/use-submit";
 import { UsPhoneInput } from "@/components/us-phone-input";
 import { usPhoneE164 } from "@/lib/phone";
 import {
@@ -606,7 +607,7 @@ function AddPlayerModal({
   const [role, setRole] = useState<Role>("cutter");
   const [odPreference, setOdPreference] = useState<ODPreference>("both");
   const [jersey, setJersey] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const { submitting, error, submit } = useSubmit();
 
   // Same single-division rule as the edit-player modal: Open/Women teams
   // don't get a gender-match choice at all.
@@ -615,9 +616,9 @@ function AddPlayerModal({
 
   const conflict = name.trim() ? playerConflict(players, { name, nickname }) : "Name is required.";
 
-  const add = async () => {
-    if (conflict) return;
-    try {
+  const add = () =>
+    submit(async () => {
+      if (conflict) return;
       await createPlayer(teamId, {
         name: name.trim(),
         nickname: nickname.trim() || undefined,
@@ -627,10 +628,7 @@ function AddPlayerModal({
         jerseyNumber: jersey ? Number(jersey) : undefined,
       });
       onAdded();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  };
+    });
 
   return (
     <Modal onClose={onClose}>
@@ -716,10 +714,10 @@ function AddPlayerModal({
         </button>
         <button
           onClick={add}
-          disabled={!!conflict}
+          disabled={!!conflict || submitting}
           className="rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white disabled:bg-disabled"
         >
-          Add
+          {submitting ? "Adding…" : "Add"}
         </button>
       </div>
     </Modal>
@@ -870,7 +868,8 @@ function Tournaments({
 }: {
   team: Team;
   tournaments: Tournament[];
-  onCreate: (name: string, startDate: string, endDate?: string) => void;
+  /** Awaited by the modal, which stays open if it rejects. */
+  onCreate: (name: string, startDate: string, endDate?: string) => Promise<void>;
 }) {
   const [adding, setAdding] = useState(false);
 
@@ -919,9 +918,10 @@ function Tournaments({
 
       {adding && (
         <AddTournamentModal
+          tournaments={tournaments}
           onClose={() => setAdding(false)}
-          onCreate={(name, startDate, endDate) => {
-            onCreate(name, startDate, endDate);
+          onCreate={async (name, startDate, endDate) => {
+            await onCreate(name, startDate, endDate);
             setAdding(false);
           }}
         />
@@ -931,22 +931,34 @@ function Tournaments({
 }
 
 function AddTournamentModal({
+  tournaments,
   onClose,
   onCreate,
 }: {
+  tournaments: Tournament[];
   onClose: () => void;
-  onCreate: (name: string, startDate: string, endDate?: string) => void;
+  onCreate: (name: string, startDate: string, endDate?: string) => Promise<void>;
 }) {
   const [name, setName] = useState("");
   const [startDate, setStartDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [endDate, setEndDate] = useState("");
+  const { submitting, error, submit } = useSubmit();
 
   const endDateInvalid = endDate !== "" && endDate < startDate;
 
-  const create = () => {
-    if (!name.trim() || endDateInvalid) return;
-    onCreate(name.trim(), startDate, endDate || undefined);
-  };
+  // Name *and* start date, matching the server's rule — a club that runs
+  // "Sectionals" every year should still be able to add this year's.
+  const duplicate = tournaments.some(
+    (t) =>
+      t.name.trim().toLowerCase() === name.trim().toLowerCase() &&
+      t.startDate === startDate,
+  );
+
+  const create = () =>
+    submit(async () => {
+      if (!name.trim() || endDateInvalid || duplicate) return;
+      await onCreate(name.trim(), startDate, endDate || undefined);
+    });
 
   return (
     <Modal onClose={onClose}>
@@ -989,6 +1001,12 @@ function AddTournamentModal({
           End date can&rsquo;t be before the start date.
         </p>
       )}
+      {duplicate && (
+        <p className="text-xs text-amber-600 dark:text-amber-400">
+          This team already has a tournament by that name starting {startDate}.
+        </p>
+      )}
+      {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
 
       <div className="flex justify-end gap-2 pt-1">
         <button
@@ -999,10 +1017,10 @@ function AddTournamentModal({
         </button>
         <button
           onClick={create}
-          disabled={!name.trim() || endDateInvalid}
+          disabled={!name.trim() || endDateInvalid || duplicate || submitting}
           className="rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white disabled:bg-disabled"
         >
-          Create
+          {submitting ? "Creating…" : "Create"}
         </button>
       </div>
     </Modal>

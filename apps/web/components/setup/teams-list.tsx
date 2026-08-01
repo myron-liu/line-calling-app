@@ -9,6 +9,7 @@ import { sameById, useCachedFetch } from "@/lib/cache";
 import { keys } from "@/lib/storage/keys";
 import { useAuth } from "@/lib/auth/auth-context";
 import { Modal } from "@/components/modal";
+import { useSubmit } from "@/lib/use-submit";
 
 export function TeamsList() {
   const { session, updateProfile } = useAuth();
@@ -22,21 +23,24 @@ export function TeamsList() {
   );
   const [name, setName] = useState("");
   const [division, setDivision] = useState<Division>("mixed");
-  const [error, setError] = useState<string | null>(null);
   const [editingName, setEditingName] = useState(false);
   const [deleting, setDeleting] = useState<Team | null>(null);
+  const { submitting, error, setError, submit } = useSubmit();
 
-  const add = async () => {
-    if (!name.trim()) return;
-    try {
+  // Flagged before the request goes out, so the coach sees why the button is
+  // dead rather than a 409 after the round trip. The server enforces the same
+  // rule (see DuplicateError) — this is just the faster half.
+  const duplicate = teams?.some(
+    (t) => t.name.trim().toLowerCase() === name.trim().toLowerCase(),
+  );
+
+  const add = () =>
+    submit(async () => {
+      if (!name.trim() || duplicate) return;
       await createTeam(name.trim(), division);
       await refresh();
       setName("");
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    }
-  };
+    });
 
   const confirmDelete = () => {
     if (!deleting) return;
@@ -138,12 +142,17 @@ export function TeamsList() {
           </select>
           <button
             onClick={add}
-            disabled={!name.trim()}
+            disabled={!name.trim() || !!duplicate || submitting}
             className="rounded bg-emerald-600 px-4 py-2 text-sm font-medium text-white disabled:bg-disabled"
           >
-            Create
+            {submitting ? "Creating…" : "Create"}
           </button>
         </div>
+        {duplicate && (
+          <p className="text-xs text-amber-600 dark:text-amber-400">
+            You already have a team with this name.
+          </p>
+        )}
         {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
       </div>
 

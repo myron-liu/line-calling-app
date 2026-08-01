@@ -124,6 +124,9 @@ function wrap(handler: Handler): Handler {
       return await handler(req, params);
     } catch (err) {
       if (err instanceof HttpError) return json({ error: err.message }, err.status);
+      // A create that would duplicate an existing row (see DuplicateError):
+      // 409 with the message verbatim, since it's written for the coach.
+      if (err instanceof q.DuplicateError) return json({ error: err.message }, 409);
       console.error(err);
       return json({ error: "internal_error" }, 500);
     }
@@ -240,7 +243,7 @@ export const routes: Route[] = [
   ),
   authedRoute("POST", "/teams", null, async (req, _params, phone) => {
     const body = await parseBody(req, z.object({ name: z.string().min(1), division }));
-    const team = await q.createTeam({ id: newId(), ...body });
+    const team = await q.createTeam({ id: newId(), ...body }, phone);
     await q.addTeamManager(team.id, phone); // creator becomes the first manager
     return json(team, 201);
   }),
