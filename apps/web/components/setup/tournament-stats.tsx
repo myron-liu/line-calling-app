@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   defensiveEfficiency,
+  efficiencyFromPlusMinus,
   offensiveEfficiency,
   type Tournament,
 } from "@shared/game-rules";
@@ -13,7 +14,7 @@ import {
   type TournamentPlayerStats,
   type TournamentStats as TournamentStatsData,
 } from "@/lib/storage/tournaments";
-import { displayName, roleTag } from "@/lib/player-display";
+import { displayName } from "@/lib/player-display";
 
 type StatSortKey =
   | "name"
@@ -22,6 +23,8 @@ type StatSortKey =
   | "dPlusMinus"
   | "oPointsPlayed"
   | "oPlusMinus"
+  | "dEfficiency"
+  | "oEfficiency"
   | "assists"
   | "goals"
   | "blocks"
@@ -38,6 +41,19 @@ function toggleStatSort(cur: StatSort, key: StatSortKey): StatSort {
   return { key, dir: key === "name" ? "asc" : "desc" };
 }
 
+/** Numeric value behind a sortable column. The two efficiencies are derived
+ *  rather than stored, and a player with no points on that side sorts below
+ *  an honest 0% instead of above it. */
+function statValue(r: TournamentPlayerStats, key: Exclude<StatSortKey, "name">): number {
+  if (key === "dEfficiency") {
+    return efficiencyFromPlusMinus(r.dPointsPlayed, r.dPlusMinus) ?? -1;
+  }
+  if (key === "oEfficiency") {
+    return efficiencyFromPlusMinus(r.oPointsPlayed, r.oPlusMinus) ?? -1;
+  }
+  return r[key];
+}
+
 function compareStatRows(
   a: TournamentPlayerStats,
   b: TournamentPlayerStats,
@@ -47,7 +63,9 @@ function compareStatRows(
     const cmp = displayName(a).localeCompare(displayName(b));
     return sort.dir === "asc" ? cmp : -cmp;
   }
-  const diff = sort.dir === "asc" ? a[sort.key] - b[sort.key] : b[sort.key] - a[sort.key];
+  const av = statValue(a, sort.key);
+  const bv = statValue(b, sort.key);
+  const diff = sort.dir === "asc" ? av - bv : bv - av;
   return diff || displayName(a).localeCompare(displayName(b));
 }
 
@@ -188,6 +206,7 @@ function SortableTh({
   onSort,
   align,
   toneClassName,
+  hint,
 }: {
   label: string;
   sortKey: StatSortKey;
@@ -195,6 +214,8 @@ function SortableTh({
   onSort: (key: StatSortKey) => void;
   align: "left" | "right";
   toneClassName?: string;
+  /** Spelled-out column name, shown on hover and to screen readers. */
+  hint?: string;
 }) {
   const active = sort.key === sortKey;
   return (
@@ -203,6 +224,8 @@ function SortableTh({
     >
       <button
         onClick={() => onSort(sortKey)}
+        title={hint}
+        aria-label={hint ? `${hint} — sort` : undefined}
         className={`inline-flex items-center gap-0.5 whitespace-nowrap hover:text-fg ${
           align === "right" ? "flex-row-reverse" : ""
         } ${active ? "text-fg" : ""}`}
@@ -211,6 +234,44 @@ function SortableTh({
         {active && <span aria-hidden>{sort.dir === "asc" ? "▲" : "▼"}</span>}
       </button>
     </th>
+  );
+}
+
+/** Every sortable stat column in display order, with the tooltip shown on
+ *  hover — the headers are abbreviated hard to fit a phone, so the long name
+ *  has to live somewhere. */
+const STAT_COLUMNS: {
+  key: Exclude<StatSortKey, "name">;
+  label: string;
+  hint: string;
+}[] = [
+  { key: "pointsPlayed", label: "Pts", hint: "Points played" },
+  { key: "dPointsPlayed", label: "D Pts", hint: "D points played" },
+  { key: "dPlusMinus", label: "D +/-", hint: "D plus/minus" },
+  {
+    key: "dEfficiency",
+    label: "D%",
+    hint: "Defensive efficiency — share of their D points won",
+  },
+  { key: "oPointsPlayed", label: "O Pts", hint: "O points played" },
+  { key: "oPlusMinus", label: "O +/-", hint: "O plus/minus" },
+  {
+    key: "oEfficiency",
+    label: "O%",
+    hint: "Offensive efficiency — share of their O points won",
+  },
+  { key: "assists", label: "A", hint: "Assists" },
+  { key: "goals", label: "G", hint: "Goals" },
+  { key: "blocks", label: "D", hint: "Defensive blocks" },
+  { key: "turnovers", label: "T", hint: "Turnovers" },
+  { key: "callahans", label: "C", hint: "Callahans" },
+];
+
+function NumCell({ children }: { children: React.ReactNode }) {
+  return (
+    <td className="border-b border-line py-1 text-right tabular-nums text-muted">
+      {children}
+    </td>
   );
 }
 
@@ -258,42 +319,34 @@ function PlayerStatsTable({
             align="left"
             toneClassName={label ? headerTone : undefined}
           />
-          <SortableTh label="Pts" sortKey="pointsPlayed" sort={sort} onSort={onSort} align="right" />
-          <SortableTh label="D Pts" sortKey="dPointsPlayed" sort={sort} onSort={onSort} align="right" />
-          <SortableTh label="D +/-" sortKey="dPlusMinus" sort={sort} onSort={onSort} align="right" />
-          <SortableTh label="O Pts" sortKey="oPointsPlayed" sort={sort} onSort={onSort} align="right" />
-          <SortableTh label="O +/-" sortKey="oPlusMinus" sort={sort} onSort={onSort} align="right" />
-          <SortableTh label="A" sortKey="assists" sort={sort} onSort={onSort} align="right" />
-          <SortableTh label="G" sortKey="goals" sort={sort} onSort={onSort} align="right" />
-          <SortableTh label="D" sortKey="blocks" sort={sort} onSort={onSort} align="right" />
-          <SortableTh label="T" sortKey="turnovers" sort={sort} onSort={onSort} align="right" />
-          <SortableTh label="C" sortKey="callahans" sort={sort} onSort={onSort} align="right" />
+          {STAT_COLUMNS.map((c) => (
+            <SortableTh
+              key={c.key}
+              label={c.label}
+              hint={c.hint}
+              sortKey={c.key}
+              sort={sort}
+              onSort={onSort}
+              align="right"
+            />
+          ))}
         </tr>
       </thead>
       <tbody>
         {rows.map((p) => (
           <tr key={p.playerId}>
-            <td className="border-b border-line py-1">
-              <span className="mr-1 shrink-0 rounded bg-surface-2 px-1 text-[10px] font-medium text-muted">
-                {roleTag(p.role)}
-              </span>
-              {displayName(p)}
-            </td>
-            <td className="border-b border-line py-1 text-right tabular-nums text-muted">
-              {p.pointsPlayed}
-            </td>
-            <td className="border-b border-line py-1 text-right tabular-nums text-muted">
-              {p.dPointsPlayed}
-            </td>
-            <td className="border-b border-line py-1 text-right tabular-nums text-muted">
-              {formatPlusMinus(p.dPlusMinus)}
-            </td>
-            <td className="border-b border-line py-1 text-right tabular-nums text-muted">
-              {p.oPointsPlayed}
-            </td>
-            <td className="border-b border-line py-1 text-right tabular-nums text-muted">
-              {formatPlusMinus(p.oPlusMinus)}
-            </td>
+            <td className="border-b border-line py-1">{displayName(p)}</td>
+            <NumCell>{p.pointsPlayed}</NumCell>
+            <NumCell>{p.dPointsPlayed}</NumCell>
+            <NumCell>{formatPlusMinus(p.dPlusMinus)}</NumCell>
+            <NumCell>
+              {formatPercent(efficiencyFromPlusMinus(p.dPointsPlayed, p.dPlusMinus))}
+            </NumCell>
+            <NumCell>{p.oPointsPlayed}</NumCell>
+            <NumCell>{formatPlusMinus(p.oPlusMinus)}</NumCell>
+            <NumCell>
+              {formatPercent(efficiencyFromPlusMinus(p.oPointsPlayed, p.oPlusMinus))}
+            </NumCell>
             <StatCell value={p.assists} />
             <StatCell value={p.goals} />
             <StatCell value={p.blocks} />

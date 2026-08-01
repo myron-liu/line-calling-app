@@ -170,6 +170,21 @@ export function defensiveEfficiency(o: TeamPointOutcomes): number | null {
   return played === 0 ? null : o.breaks / played;
 }
 
+/**
+ * The same conversion rate, for one player, recovered from the played/+/-
+ * pair already tracked per side: +/- is (won − lost) and played is
+ * (won + lost), so won is (played + plusMinus) / 2.
+ *
+ * Null when they haven't played a point on that side — see
+ * offensiveEfficiency for why that isn't reported as 0%.
+ */
+export function efficiencyFromPlusMinus(
+  played: number,
+  plusMinus: number,
+): number | null {
+  return played === 0 ? null : (played + plusMinus) / 2 / played;
+}
+
 // ── Recorded stats (Ds, turnovers, goals) — § stats ─────────────────────────
 
 /** Per-player totals of everything recorded by hand during play, in the same

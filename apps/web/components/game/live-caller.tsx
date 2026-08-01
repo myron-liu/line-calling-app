@@ -896,6 +896,11 @@ function LineBuilder({
                 if (isLineApplied(line)) actions.recordLineUsage(line.id);
               }
               actions.confirmLine(selected);
+              // Confirming swaps the whole surface for the in-progress
+              // controls, and the coach has usually scrolled well down the
+              // roster to build the line — land them on the point clock and
+              // the score buttons, not halfway down the next screen.
+              window.scrollTo({ top: 0, behavior: "smooth" });
             }}
             className="w-full rounded-lg bg-emerald-600 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:bg-disabled"
           >
