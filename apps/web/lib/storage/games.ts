@@ -39,6 +39,7 @@ export function rosterSnapshot(
     jerseyNumber: p.jerseyNumber,
     injured: injuredIds.has(p.id),
     active: true,
+    tags: p.tags,
   }));
 }
 

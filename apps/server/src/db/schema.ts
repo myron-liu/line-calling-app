@@ -73,6 +73,12 @@ export const players = pgTable("players", {
   role: text("role").notNull(), // "handler" | "cutter" | "both"
   odPreference: text("od_preference"), // "O" | "D" | "both" | null
   jerseyNumber: integer("jersey_number"),
+  // Free-form coach-assigned labels, distinct from role/O-D preference (e.g.
+  // "Zone D specialist", "Rookie") — reused across players the same way
+  // SavedLine.tags works: no separate managed list, just whatever string
+  // values are currently in use across the roster. Filterable in the live
+  // caller's line builder (see live-caller.tsx).
+  tags: jsonb("tags").notNull().default([]).$type<string[]>(),
   createdAt: createdAt(),
 });
 
@@ -198,6 +204,9 @@ export const gameRoster = pgTable(
     jerseyNumber: integer("jersey_number"),
     injured: boolean("injured").notNull().default(false),
     active: boolean("active").notNull().default(true),
+    // Mirrors players.tags at snapshot time, kept in sync the same way the
+    // rest of this row is (see syncTournamentGameRosters).
+    tags: jsonb("tags").notNull().default([]).$type<string[]>(),
   },
   (t) => [uniqueIndex("game_roster_unique").on(t.gameId, t.playerId)],
 );

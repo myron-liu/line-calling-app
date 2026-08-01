@@ -38,6 +38,7 @@ export interface RosterSnapshotEntry {
   injured: boolean;
   /** False once removed from the tournament's check-in roster. Missing = active. */
   active?: boolean;
+  tags?: string[];
 }
 
 /** True unless a player has been explicitly removed from the check-in roster. */

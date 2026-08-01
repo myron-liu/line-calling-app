@@ -606,12 +606,18 @@ function AddPlayerModal({
   const [role, setRole] = useState<Role>("cutter");
   const [odPreference, setOdPreference] = useState<ODPreference>("both");
   const [jersey, setJersey] = useState("");
+  const [tags, setTags] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   // Same single-division rule as the edit-player modal: Open/Women teams
   // don't get a gender-match choice at all.
   const fixedGenderMatch: GenderMatch | null =
     division === "open" ? "MMP" : division === "women" ? "WMP" : null;
+
+  const teamTags = useMemo(
+    () => Array.from(new Set(players.flatMap((p) => p.tags ?? []))).sort(),
+    [players],
+  );
 
   const conflict = name.trim() ? playerConflict(players, { name, nickname }) : "Name is required.";
 
@@ -625,6 +631,7 @@ function AddPlayerModal({
         role,
         odPreference,
         jerseyNumber: jersey ? Number(jersey) : undefined,
+        tags,
       });
       onAdded();
     } catch (err) {
@@ -698,6 +705,7 @@ function AddPlayerModal({
             className="h-9 w-20 rounded border border-line-strong px-2"
           />
         </label>
+        <PlayerTagsField tags={tags} onChange={setTags} existingTags={teamTags} />
       </div>
 
       {conflict && name.trim() && (
@@ -748,12 +756,18 @@ function EditPlayerModal({
   const [odPreference, setOdPreference] = useState<ODPreference>(
     player.odPreference ?? "both",
   );
+  const [tags, setTags] = useState<string[]>(player.tags ?? []);
   const [error, setError] = useState<string | null>(null);
 
   // Same single-division rule as the roster-addition form: Open/Women teams
   // don't get a gender-match choice at all.
   const fixedGenderMatch: GenderMatch | null =
     division === "open" ? "MMP" : division === "women" ? "WMP" : null;
+
+  const teamTags = useMemo(
+    () => Array.from(new Set(players.flatMap((p) => p.tags ?? []))).sort(),
+    [players],
+  );
 
   const conflict = name.trim()
     ? playerConflict(players, { name, nickname }, player.id)
@@ -767,6 +781,7 @@ function EditPlayerModal({
       genderMatch: fixedGenderMatch ?? genderMatch,
       role,
       odPreference,
+      tags,
     };
     try {
       await updatePlayer(player.id, patch);
@@ -833,6 +848,7 @@ function EditPlayerModal({
             <option value="both">O/D</option>
           </select>
         </label>
+        <PlayerTagsField tags={tags} onChange={setTags} existingTags={teamTags} />
       </div>
 
       {conflict && name.trim() && (
@@ -858,6 +874,87 @@ function EditPlayerModal({
         </button>
       </div>
     </Modal>
+  );
+}
+
+// ── Player tags field ────────────────────────────────────────────────────────────
+// Free-form, reusable across players (§ Player.tags) — mirrors the custom-tag
+// input in lines-editor.tsx, plus one-tap "existing tag" suggestions so a
+// coach doesn't have to retype a tag they've already used on another player.
+
+function PlayerTagsField({
+  tags,
+  onChange,
+  existingTags,
+}: {
+  tags: string[];
+  onChange: (tags: string[]) => void;
+  existingTags: string[];
+}) {
+  const [tagInput, setTagInput] = useState("");
+
+  const addTag = (raw: string) => {
+    const t = raw.trim();
+    if (!t) return;
+    if (!tags.some((x) => x.toLowerCase() === t.toLowerCase())) {
+      onChange([...tags, t]);
+    }
+    setTagInput("");
+  };
+  const removeTag = (t: string) => onChange(tags.filter((x) => x !== t));
+
+  const suggestions = existingTags.filter(
+    (t) => !tags.some((x) => x.toLowerCase() === t.toLowerCase()),
+  );
+
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-muted">Tags</span>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {tags.map((t) => (
+          <span
+            key={t}
+            className="flex items-center gap-1 rounded-full border border-line-strong bg-surface-2 px-2 py-0.5 text-xs"
+          >
+            {t}
+            <button
+              onClick={() => removeTag(t)}
+              aria-label={`Remove tag ${t}`}
+              className="text-faint hover:text-fg"
+            >
+              ×
+            </button>
+          </span>
+        ))}
+        <input
+          value={tagInput}
+          onChange={(e) => setTagInput(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === ",") {
+              e.preventDefault();
+              addTag(tagInput);
+            }
+          }}
+          onBlur={() => addTag(tagInput)}
+          placeholder="Add tag…"
+          className="min-w-[6rem] flex-1 rounded border border-line-strong px-2 py-1 text-xs"
+        />
+      </div>
+      {suggestions.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] text-faint">Existing:</span>
+          {suggestions.map((t) => (
+            <button
+              key={t}
+              onClick={() => addTag(t)}
+              className="rounded-full border border-dashed border-line-strong px-2 py-0.5 text-xs text-faint hover:text-fg"
+            >
+              + {t}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

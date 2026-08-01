@@ -63,6 +63,7 @@ const rosterEntry = z.object({
   jerseyNumber: z.number().optional(),
   injured: z.boolean(),
   active: z.boolean().optional(),
+  tags: z.array(z.string()).optional(),
 });
 
 const pointSchema = z.object({
@@ -82,6 +83,8 @@ const pointSchema = z.object({
     .optional(),
   result: z.enum(["us", "them"]).optional(),
   isFirstAfterHalftime: z.boolean(),
+  startedAt: z.string().optional(),
+  endedAt: z.string().optional(),
 });
 
 const gameMetaSchema = z.object({
@@ -268,6 +271,7 @@ export const routes: Route[] = [
         role,
         odPreference: odPreference.optional(),
         jerseyNumber: z.number().optional(),
+        tags: z.array(z.string()).optional(),
       }),
     );
     return json(await q.createPlayer(newId(), id!, body), 201);
@@ -286,6 +290,7 @@ export const routes: Route[] = [
           role: role.optional(),
           odPreference: odPreference.optional(),
           jerseyNumber: z.number().optional(),
+          tags: z.array(z.string()).optional(),
         }),
       );
       const player = await q.updatePlayer(id!, body);

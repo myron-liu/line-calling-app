@@ -199,6 +199,7 @@ export interface PlayerInput {
   role: Role;
   odPreference?: ODPreference;
   jerseyNumber?: number;
+  tags?: string[];
 }
 
 export async function listPlayers(teamId: string): Promise<Player[]> {
@@ -233,6 +234,7 @@ export async function createPlayer(
       role: input.role,
       odPreference: input.odPreference,
       jerseyNumber: input.jerseyNumber,
+      tags: input.tags ?? [],
     })
     .returning();
   return toPlayer(row!);
@@ -293,6 +295,7 @@ function toPlayer(row: typeof players.$inferSelect): Player {
     role: row.role as Role,
     odPreference: (row.odPreference as ODPreference) ?? undefined,
     jerseyNumber: row.jerseyNumber ?? undefined,
+    tags: row.tags,
     createdAt: row.createdAt.toISOString(),
   };
 }
@@ -456,6 +459,7 @@ export async function syncTournamentGameRosters(
                 role: player.role,
                 odPreference: player.odPreference,
                 jerseyNumber: player.jerseyNumber,
+                tags: player.tags ?? [],
               }
             : { active },
         )
@@ -478,6 +482,7 @@ export async function syncTournamentGameRosters(
         jerseyNumber: p.jerseyNumber,
         injured: injuredByPlayerId.get(p.id) ?? false,
         active: true,
+        tags: p.tags ?? [],
       });
     }
   }
@@ -673,6 +678,7 @@ export interface RosterSnapshotEntry {
   jerseyNumber?: number;
   injured: boolean;
   active?: boolean;
+  tags?: string[];
 }
 
 export interface GameFull {
@@ -763,6 +769,7 @@ export async function createGame(input: CreateGameInput): Promise<GameFull> {
         jerseyNumber: p.jerseyNumber,
         injured: p.injured,
         active: p.active ?? true,
+        tags: p.tags ?? [],
       })),
     );
   }
@@ -1131,6 +1138,7 @@ export async function syncGame(
         jerseyNumber: entry.jerseyNumber,
         injured: entry.injured,
         active: entry.active ?? true,
+        tags: entry.tags ?? [],
       })
       .onConflictDoUpdate({
         target: [gameRoster.gameId, gameRoster.playerId],
@@ -1143,6 +1151,7 @@ export async function syncGame(
           jerseyNumber: entry.jerseyNumber,
           injured: entry.injured,
           active: entry.active ?? true,
+          tags: entry.tags ?? [],
         },
       });
   }
@@ -1200,6 +1209,7 @@ function toRosterEntry(
     jerseyNumber: row.jerseyNumber ?? undefined,
     injured: row.injured,
     active: row.active,
+    tags: row.tags,
   };
 }
 

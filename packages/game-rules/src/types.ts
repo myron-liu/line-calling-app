@@ -71,6 +71,12 @@ export interface Player {
   /** Preferred side of the disc; defaults to "both" when unset. */
   odPreference?: ODPreference;
   jerseyNumber?: number;
+  /** Free-form coach-assigned labels, distinct from `role` (e.g. "Zone D
+   *  specialist", "Rookie") — a player can have several. No separate managed
+   *  list: a tag exists as long as some player carries it, and the UI offers
+   *  already-used tags so a coach can reapply one instead of retyping it
+   *  (same pattern as SavedLine.tags). Filterable in the live caller. */
+  tags?: string[];
   createdAt: string;
 }
 

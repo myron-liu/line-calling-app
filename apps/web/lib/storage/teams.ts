@@ -49,6 +49,7 @@ export interface PlayerInput {
   role: Role;
   odPreference?: ODPreference;
   jerseyNumber?: number;
+  tags?: string[];
 }
 
 const norm = (s: string | undefined): string => (s ?? "").trim().toLowerCase();

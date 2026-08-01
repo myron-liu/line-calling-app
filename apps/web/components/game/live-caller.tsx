@@ -295,15 +295,32 @@ function LineBuilder({
     [roster],
   );
 
+  // Player tags (§ Player.tags) filter the roster list shown below — purely a
+  // display filter, so it never touches eligibleIds/byId (selection,
+  // validation, and quick-lines composition are unaffected either way; a
+  // player picked via a saved line/pod just won't be visible to tap again
+  // while the filter hides them). A plain useState resets to "all" every new
+  // point for free, the same way tagFilter above does — both "confirm" and
+  // "prepare" instances of this component remount fresh each point.
+  const [playerTagFilter, setPlayerTagFilter] = useState<string | "all">("all");
+  const availablePlayerTags = useMemo(
+    () => Array.from(new Set(eligible.flatMap((p) => p.tags ?? []))).sort(),
+    [eligible],
+  );
+  const visibleEligible =
+    playerTagFilter === "all"
+      ? eligible
+      : eligible.filter((p) => p.tags?.includes(playerTagFilter));
+
   // Split eligible players by O/D preference for the two accordions below.
   // "both" and unset (no preference recorded) show up in both groups.
   const oGroup = useMemo(
-    () => eligible.filter((p) => p.odPreference !== "D"),
-    [eligible],
+    () => visibleEligible.filter((p) => p.odPreference !== "D"),
+    [visibleEligible],
   );
   const dGroup = useMemo(
-    () => eligible.filter((p) => p.odPreference !== "O"),
-    [eligible],
+    () => visibleEligible.filter((p) => p.odPreference !== "O"),
+    [visibleEligible],
   );
   const oIds = useMemo(() => new Set(oGroup.map((p) => p.playerId)), [oGroup]);
   const dIds = useMemo(() => new Set(dGroup.map((p) => p.playerId)), [dGroup]);
@@ -706,6 +723,25 @@ function LineBuilder({
           onClick={() => setSortMode("minutes")}
         />
       </div>
+
+      {availablePlayerTags.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="text-faint">Tag:</span>
+          <SortToggleButton
+            label="All"
+            active={playerTagFilter === "all"}
+            onClick={() => setPlayerTagFilter("all")}
+          />
+          {availablePlayerTags.map((tag) => (
+            <SortToggleButton
+              key={tag}
+              label={tag}
+              active={playerTagFilter === tag}
+              onClick={() => setPlayerTagFilter(tag)}
+            />
+          ))}
+        </div>
+      )}
 
       <ODAccordion
         label="Offense"
