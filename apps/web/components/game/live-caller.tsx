@@ -579,13 +579,9 @@ function LineBuilder({
       ? justPlayedLineId
       : null;
 
-  // Quick lines starts open iff a saved line/pod was used last point (checked
-  // against the raw previous lineup, not `justPlayedId` — the new point's
-  // selection starts empty, so it'd never overlap yet). Controlled (not just
-  // an initial value) so the coach can still freely toggle it afterward.
-  const [quickLinesOpen, setQuickLinesOpen] = useState(
-    () => justPlayedLineId !== null,
-  );
+  // Controlled (not just an initial value) so the coach can freely collapse it
+  // for this point without it springing back open on the next re-render.
+  const [quickLinesOpen, setQuickLinesOpen] = useState(true);
 
   // Add players up to the caps, deduping and skipping ineligible ones.
   const mergeWithCaps = (base: string[], incoming: string[]) => {
@@ -668,7 +664,7 @@ function LineBuilder({
         lines={visibleQuickLines}
         appliedIds={appliedLineIds}
         justPlayedId={justPlayedId}
-        ratioLabel={need ? `${maxMMP}M / ${maxWMP}W` : "any 7"}
+        ratioLabel={need ? `${maxMMP}M / ${maxWMP}W` : null}
         onApply={applyLine}
         note={applyNote}
         open={quickLinesOpen}
@@ -1321,7 +1317,8 @@ function SavedLinesBar({
   lines: QuickLine[];
   appliedIds: Set<string>;
   justPlayedId: string | null;
-  ratioLabel: string;
+  /** Null for a non-mixed game, where there's no ratio to qualify by. */
+  ratioLabel: string | null;
   onApply: (line: SavedLine) => void;
   note: string | null;
   open: boolean;
@@ -1336,7 +1333,7 @@ function SavedLinesBar({
       className="rounded-lg border border-line p-2"
     >
       <summary className="cursor-pointer text-xs font-medium uppercase tracking-wide text-faint">
-        Quick lines · {ratioLabel}
+        Quick lines{ratioLabel ? ` · ${ratioLabel}` : ""}
       </summary>
 
       <div className="mt-2 space-y-2">
@@ -1392,9 +1389,22 @@ function SavedLinesBar({
                       {line.side && line.side !== "both" ? ` · ${line.side}` : ""}
                       {" · "}
                       {mmp}M/{wmp}W · {line.useCount ?? 0}×
-                      {line.tags && line.tags.length > 0 && ` · ${line.tags.join(", ")}`}
                     </span>
                   </button>
+                  {line.tags && line.tags.length > 0 && (
+                    <span className="flex flex-wrap gap-1">
+                      {line.tags.map((t) => (
+                        <span
+                          key={t}
+                          className={`rounded-full border px-1.5 text-[10px] font-medium ${
+                            SITUATION_TAG_COLOR[t as SituationTag] ?? "border-current opacity-70"
+                          }`}
+                        >
+                          {t}
+                        </span>
+                      ))}
+                    </span>
+                  )}
                   {line.id === justPlayedId && (
                     <span className="text-[10px] font-medium opacity-80">Just played</span>
                   )}
