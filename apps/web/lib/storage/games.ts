@@ -60,6 +60,10 @@ export interface CreateGameInput {
   gameDate?: string;
   startTime?: string;
   opposingCoachName?: string;
+  /** Time caps in minutes from the first confirmed line (§ cap banners). */
+  halfCapMinutes?: number;
+  softCapMinutes?: number;
+  hardCapMinutes?: number;
   roster: RosterSnapshotEntry[];
 }
 
@@ -76,6 +80,9 @@ export async function createGame(input: CreateGameInput): Promise<Game> {
     gameDate: input.gameDate,
     startTime: input.startTime,
     opposingCoachName: input.opposingCoachName,
+    halfCapMinutes: input.halfCapMinutes,
+    softCapMinutes: input.softCapMinutes,
+    hardCapMinutes: input.hardCapMinutes,
     roster: input.roster,
   });
 
@@ -123,6 +130,9 @@ export interface GameMetadataPatch {
   gameDate?: string | null;
   startTime?: string | null;
   opposingCoachName?: string | null;
+  halfCapMinutes?: number | null;
+  softCapMinutes?: number | null;
+  hardCapMinutes?: number | null;
 }
 
 /** Edits a game's administrative details (§ edit-game-modal) — safe at any

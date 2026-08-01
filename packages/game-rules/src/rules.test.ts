@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  currentCapStatus,
   invertRatio,
   ratioForPoint,
   ratioCounts,
@@ -506,5 +507,51 @@ describe("lineWarnings (§8, soft)", () => {
       squadAveragePoints: 4,
     });
     expect(w.map((x) => x.code)).toContain("time_imbalance");
+  });
+});
+
+describe("currentCapStatus", () => {
+  const caps = { halfCapMinutes: 40, softCapMinutes: 75, hardCapMinutes: 90 };
+
+  test("stays quiet until a cap is within the warning window", () => {
+    expect(currentCapStatus(caps, 0)).toBeNull();
+    expect(currentCapStatus(caps, 24)).toBeNull();
+    expect(currentCapStatus(caps, 25)).toEqual({
+      label: "Half cap",
+      minutesRemaining: 15,
+      reached: false,
+    });
+  });
+
+  test("counts down, then flips to reached", () => {
+    expect(currentCapStatus(caps, 39.5)?.minutesRemaining).toBe(0);
+    expect(currentCapStatus(caps, 39.5)?.reached).toBe(false);
+    expect(currentCapStatus(caps, 40)).toMatchObject({
+      label: "Half cap",
+      reached: true,
+    });
+  });
+
+  test("reports the most advanced cap passed, not the earliest", () => {
+    // Past soft cap and inside hard cap's window: the coach needs to hear
+    // "soft cap", not still be told about half.
+    expect(currentCapStatus(caps, 80)).toMatchObject({
+      label: "Soft cap",
+      reached: true,
+    });
+    expect(currentCapStatus(caps, 95)).toMatchObject({
+      label: "Hard cap",
+      reached: true,
+    });
+  });
+
+  test("handles a partially configured or empty set of caps", () => {
+    expect(currentCapStatus({}, 500)).toBeNull();
+    expect(currentCapStatus({ hardCapMinutes: 90 }, 10)).toBeNull();
+    expect(currentCapStatus({ hardCapMinutes: 90 }, 80)).toMatchObject({
+      label: "Hard cap",
+      minutesRemaining: 10,
+      reached: false,
+    });
   });
 });

@@ -184,6 +184,10 @@ export const games = pgTable("games", {
   gameDate: text("game_date"), // ISO date, kept as text to match Tournament
   startTime: text("start_time"),
   opposingCoachName: text("opposing_coach_name"),
+  // Time caps in minutes from the first confirmed line (§ cap banners).
+  halfCapMinutes: integer("half_cap_minutes"),
+  softCapMinutes: integer("soft_cap_minutes"),
+  hardCapMinutes: integer("hard_cap_minutes"),
   // Resolved by the post-creation flip-result step, not asked upfront, since
   // they're only known after the actual disc flip — null until then.
   fieldSide: text("field_side"), // "left" | "right" | null

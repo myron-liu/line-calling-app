@@ -181,6 +181,20 @@ export interface Game {
   opposingCoachName?: string;
 
   /**
+   * Time caps, in minutes from the moment the first line was confirmed (the
+   * game's real start — see Point.startedAt). All optional: plenty of games
+   * are played to score alone.
+   *
+   * Independent of `gameCap`/`halfScore`, which are the *score* thresholds.
+   * These drive the countdown banners in the live caller and nothing else —
+   * reaching one doesn't automatically call halftime or end the game, since
+   * the coach still has to hear the horn and agree it happened.
+   */
+  halfCapMinutes?: number;
+  softCapMinutes?: number;
+  hardCapMinutes?: number;
+
+  /**
    * Decided at the coin flip, after creation — unset while `status` is
    * "scheduled". "left"/"right" is relative to home, i.e. where your team's
    * sideline stuff is.

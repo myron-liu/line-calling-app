@@ -185,6 +185,57 @@ export function efficiencyFromPlusMinus(
   return played === 0 ? null : (played + plusMinus) / 2 / played;
 }
 
+// ── Time caps — § cap banners ───────────────────────────────────────────────
+
+/** How long before a cap the live caller starts warning. */
+export const CAP_WARNING_MINUTES = 15;
+
+export interface CapStatus {
+  label: "Half cap" | "Soft cap" | "Hard cap";
+  /** Whole minutes until the cap; negative once it's passed. */
+  minutesRemaining: number;
+  reached: boolean;
+}
+
+/**
+ * Which cap, if any, the live caller should be shouting about right now.
+ *
+ * Returns the *most advanced* cap already reached — a game past soft cap
+ * needs to hear "soft cap", not still be counting down to half — and
+ * otherwise the soonest one inside the 15-minute warning window. Null when
+ * no cap is configured or none is close yet.
+ *
+ * `elapsedMinutes` is measured from the first confirmed line; the caller owns
+ * reading the clock, since everything in this module is a pure function of
+ * its arguments.
+ */
+export function currentCapStatus(
+  game: Pick<Game, "halfCapMinutes" | "softCapMinutes" | "hardCapMinutes">,
+  elapsedMinutes: number,
+): CapStatus | null {
+  const caps: { label: CapStatus["label"]; at: number }[] = [];
+  if (game.halfCapMinutes) caps.push({ label: "Half cap", at: game.halfCapMinutes });
+  if (game.softCapMinutes) caps.push({ label: "Soft cap", at: game.softCapMinutes });
+  if (game.hardCapMinutes) caps.push({ label: "Hard cap", at: game.hardCapMinutes });
+  if (caps.length === 0) return null;
+  caps.sort((a, b) => a.at - b.at);
+
+  const passed = caps.filter((c) => elapsedMinutes >= c.at);
+  const target = passed.length
+    ? passed[passed.length - 1]!
+    : caps.find((c) => c.at - elapsedMinutes <= CAP_WARNING_MINUTES);
+  if (!target) return null;
+
+  const minutesRemaining = target.at - elapsedMinutes;
+  return {
+    label: target.label,
+    // Round toward zero so "0 min left" only shows in the final minute
+    // rather than the moment 30 seconds remain.
+    minutesRemaining: Math.floor(minutesRemaining),
+    reached: minutesRemaining <= 0,
+  };
+}
+
 // ── Recorded stats (Ds, turnovers, goals) — § stats ─────────────────────────
 
 /** Per-player totals of everything recorded by hand during play, in the same

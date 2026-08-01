@@ -39,6 +39,13 @@ import {
 } from "@/lib/storage/games";
 import { Modal } from "@/components/modal";
 import { useSubmit } from "@/lib/use-submit";
+import {
+  CapMinutesFields,
+  capDraftFrom,
+  capOrderError,
+  capValue,
+  type CapMinutesDraft,
+} from "./cap-minutes-fields";
 import { UsPhoneInput } from "@/components/us-phone-input";
 import { usPhoneE164 } from "@/lib/phone";
 import {
@@ -1246,8 +1253,11 @@ function EditGameModal({
   const [gameDate, setGameDate] = useState(game.gameDate ?? "");
   const [startTime, setStartTime] = useState(game.startTime ?? "");
   const [opposingCoachName, setOpposingCoachName] = useState(game.opposingCoachName ?? "");
+  const [caps, setCaps] = useState<CapMinutesDraft>(() => capDraftFrom(game));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const capError = capOrderError(caps);
 
   const gameDateInvalid =
     gameDate !== "" &&
@@ -1255,7 +1265,7 @@ function EditGameModal({
       (tournamentEndDate !== undefined && gameDate > tournamentEndDate));
 
   const save = async () => {
-    if (!opponentName.trim() || gameDateInvalid) return;
+    if (!opponentName.trim() || gameDateInvalid || capError || saving) return;
     setSaving(true);
     setError(null);
     try {
@@ -1265,6 +1275,11 @@ function EditGameModal({
         gameDate: gameDate || null,
         startTime: startTime.trim() || null,
         opposingCoachName: opposingCoachName.trim() || null,
+        // null, not undefined — a cleared field has to actually remove the
+        // cap, and an omitted key would just leave the old value in place.
+        halfCapMinutes: capValue(caps.half) ?? null,
+        softCapMinutes: capValue(caps.soft) ?? null,
+        hardCapMinutes: capValue(caps.hard) ?? null,
       };
       const updated = await updateGameMetadata(game.id, patch);
       onSaved(updated);
@@ -1323,6 +1338,9 @@ function EditGameModal({
           />
         </label>
       </div>
+
+      <CapMinutesFields draft={caps} onChange={setCaps} />
+
       {gameDateInvalid && (
         <p className="text-xs text-red-600 dark:text-red-400">
           Game date must fall within the tournament ({tournamentStartDate}
@@ -1339,7 +1357,7 @@ function EditGameModal({
         </button>
         <button
           onClick={save}
-          disabled={!opponentName.trim() || gameDateInvalid || saving}
+          disabled={!opponentName.trim() || gameDateInvalid || !!capError || saving}
           className="rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white disabled:bg-disabled"
         >
           {saving ? "Saving…" : "Save"}

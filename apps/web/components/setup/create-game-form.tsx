@@ -4,6 +4,13 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Division, Game, GameCapMode, Player } from "@shared/game-rules";
 import { createGame, rosterSnapshot } from "@/lib/storage/games";
+import {
+  CapMinutesFields,
+  capOrderError,
+  capValue,
+  emptyCapDraft,
+  type CapMinutesDraft,
+} from "./cap-minutes-fields";
 
 // Create-game form, shared by individual games (pick a subset of the team roster)
 // and tournament games (roster comes from check-in). Creates the game and jumps
@@ -45,6 +52,7 @@ export function CreateGameForm({
   const [gameDate, setGameDate] = useState(tournamentStartDate ?? "");
   const [startTime, setStartTime] = useState("");
   const [opposingCoachName, setOpposingCoachName] = useState("");
+  const [caps, setCaps] = useState<CapMinutesDraft>(emptyCapDraft);
   const [selected, setSelected] = useState<Set<string>>(
     () => new Set(players.map((p) => p.id)),
   );
@@ -94,8 +102,10 @@ export function CreateGameForm({
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const capError = capOrderError(caps);
+
   const submit = async () => {
-    if (gameDateInvalid || duplicate || creating) return;
+    if (gameDateInvalid || duplicate || creating || capError) return;
     const roster = rosterSnapshot(chosen, injuredIds ?? new Set());
     setCreating(true);
     setError(null);
@@ -110,6 +120,9 @@ export function CreateGameForm({
         gameDate: gameDate || undefined,
         startTime: startTime.trim() || undefined,
         opposingCoachName: opposingCoachName.trim() || undefined,
+        halfCapMinutes: capValue(caps.half),
+        softCapMinutes: capValue(caps.soft),
+        hardCapMinutes: capValue(caps.hard),
         roster,
       });
       router.push(`/games/${game.id}`);
@@ -207,6 +220,8 @@ export function CreateGameForm({
         </label>
       </div>
 
+      <CapMinutesFields draft={caps} onChange={setCaps} />
+
       {selectable && (
         <div className="space-y-1">
           <p className="text-xs font-medium uppercase tracking-wide text-faint">
@@ -260,7 +275,9 @@ export function CreateGameForm({
       <div className="flex gap-2">
         <button
           onClick={submit}
-          disabled={!enoughPlayers || gameDateInvalid || duplicate || creating}
+          disabled={
+            !enoughPlayers || gameDateInvalid || duplicate || !!capError || creating
+          }
           className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white disabled:bg-disabled"
         >
           {creating ? "Creating…" : "Create game"}

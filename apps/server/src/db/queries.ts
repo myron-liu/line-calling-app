@@ -802,6 +802,9 @@ export interface CreateGameInput {
   gameDate?: string;
   startTime?: string;
   opposingCoachName?: string;
+  halfCapMinutes?: number;
+  softCapMinutes?: number;
+  hardCapMinutes?: number;
   roster: RosterSnapshotEntry[];
 }
 
@@ -861,6 +864,9 @@ export async function createGame(input: CreateGameInput): Promise<GameFull> {
       gameDate: input.gameDate,
       startTime: input.startTime,
       opposingCoachName: input.opposingCoachName,
+      halfCapMinutes: input.halfCapMinutes,
+      softCapMinutes: input.softCapMinutes,
+      hardCapMinutes: input.hardCapMinutes,
       status: "scheduled",
       ourTimeoutsRemaining: input.timeoutsPerHalf,
       theirTimeoutsRemaining: input.timeoutsPerHalf,
@@ -991,6 +997,9 @@ export async function updateGameMetadata(
     gameDate?: string | null;
     startTime?: string | null;
     opposingCoachName?: string | null;
+    halfCapMinutes?: number | null;
+    softCapMinutes?: number | null;
+    hardCapMinutes?: number | null;
   },
 ): Promise<Game | null> {
   if (patch.gameDate) {
@@ -1331,6 +1340,9 @@ function toGame(row: typeof games.$inferSelect): Game {
     gameDate: row.gameDate ?? undefined,
     startTime: row.startTime ?? undefined,
     opposingCoachName: row.opposingCoachName ?? undefined,
+    halfCapMinutes: row.halfCapMinutes ?? undefined,
+    softCapMinutes: row.softCapMinutes ?? undefined,
+    hardCapMinutes: row.hardCapMinutes ?? undefined,
     fieldSide: (row.fieldSide as "left" | "right" | null) ?? undefined,
     teamColor: (row.teamColor as "light" | "dark" | null) ?? undefined,
     status: row.status as GameStatus,

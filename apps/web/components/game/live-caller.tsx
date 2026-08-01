@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   SITUATION_TAGS,
+  currentCapStatus,
   genderStateLabel,
   playerSecondsPlayed,
   ratioCounts,
@@ -79,6 +80,7 @@ export function LiveCaller({ live }: { live: LiveGame }) {
 
   return (
     <div className="space-y-4">
+      <CapBanner live={live} />
       <Header live={live} />
       {error && (
         <p className="rounded-md bg-red-50 dark:bg-red-500/10 px-3 py-2 text-sm text-red-700 dark:text-red-400">
@@ -154,6 +156,64 @@ function Tab({
     >
       {label}
     </button>
+  );
+}
+
+// ── Cap warning banner (§ cap banners) ──────────────────────────────────────
+
+/**
+ * Fixed banner warning that half/soft/hard cap is 15 minutes out, then that
+ * it's been reached. Pinned over everything so it's impossible to miss with
+ * the phone held at arm's length — a coach who misses hard cap has a real
+ * problem.
+ *
+ * Elapsed time runs from the first confirmed line, not the scheduled start:
+ * games rarely start on time, and the cap horn is keyed to the actual pull.
+ * Dismissal is per-cap, so waving off the half-cap warning doesn't also
+ * silence soft and hard.
+ */
+function CapBanner({ live }: { live: LiveGame }) {
+  const { game, points, state } = live;
+  const [dismissed, setDismissed] = useState<string | null>(null);
+
+  const firstStartedAt = points.find((p) => p.startedAt)?.startedAt;
+  const hasCaps =
+    !!game.halfCapMinutes || !!game.softCapMinutes || !!game.hardCapMinutes;
+  // Shares the clocks' one-second ticker; the displayed value only changes
+  // once a minute, but a separate slower interval isn't worth the machinery.
+  const now = useTicker(hasCaps && !!firstStartedAt && state.phase !== "completed");
+
+  if (!hasCaps || !firstStartedAt) return null;
+  const elapsedMinutes =
+    (now - new Date(firstStartedAt).getTime()) / 60000;
+  const status = currentCapStatus(game, elapsedMinutes);
+  if (!status) return null;
+
+  // Keyed by cap and phase, so the "reached" message still appears after its
+  // countdown was dismissed.
+  const key = `${status.label}:${status.reached ? "reached" : "warning"}`;
+  if (dismissed === key) return null;
+
+  return (
+    <div
+      role="alert"
+      className={`fixed inset-x-0 top-0 z-[100] flex items-center justify-between gap-3 px-4 py-2.5 text-sm font-semibold text-white shadow-lg ${
+        status.reached ? "bg-red-600" : "bg-amber-500"
+      }`}
+    >
+      <span>
+        {status.reached
+          ? `${status.label} reached`
+          : `${status.minutesRemaining} min to ${status.label.toLowerCase()}`}
+      </span>
+      <button
+        onClick={() => setDismissed(key)}
+        aria-label="Dismiss"
+        className="shrink-0 rounded px-2 py-0.5 text-xs font-medium ring-1 ring-white/50"
+      >
+        Dismiss
+      </button>
+    </div>
   );
 }
 

@@ -118,6 +118,10 @@ const gameMetaSchema = z.object({
 // numbers a caller types into the "add manager" UI.
 const phoneNumber = z.string().regex(/^\+[1-9]\d{6,14}$/, "Must be E.164, e.g. +14155550123");
 
+// A time cap in whole minutes from the game's first confirmed line. Capped at
+// a day so a fat-fingered entry can't produce a nonsense countdown.
+const capMinutes = z.number().int().positive().max(1440);
+
 function wrap(handler: Handler): Handler {
   return async (req, params) => {
     try {
@@ -535,6 +539,9 @@ export const routes: Route[] = [
           gameDate: z.string().optional(),
           startTime: z.string().optional(),
           opposingCoachName: z.string().optional(),
+          halfCapMinutes: capMinutes.optional(),
+          softCapMinutes: capMinutes.optional(),
+          hardCapMinutes: capMinutes.optional(),
           roster: z.array(rosterEntry),
         }),
       );
@@ -573,6 +580,9 @@ export const routes: Route[] = [
         gameDate: z.string().nullable().optional(),
         startTime: z.string().nullable().optional(),
         opposingCoachName: z.string().nullable().optional(),
+        halfCapMinutes: capMinutes.nullable().optional(),
+        softCapMinutes: capMinutes.nullable().optional(),
+        hardCapMinutes: capMinutes.nullable().optional(),
       }),
     );
     const game = await q.updateGameMetadata(id!, body);
