@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import {
   SITUATION_TAGS,
   genderStateLabel,
@@ -77,6 +78,7 @@ export function LiveCaller({ live }: { live: LiveGame }) {
           pointNumber={state.currentPointNumber}
           genderRatio={state.genderRatio}
           od={state.od}
+          replaySeed={live.replaySeed}
         />
       )}
       {state.phase === "point_in_progress" && (
@@ -253,6 +255,7 @@ function LineBuilder({
   genderRatio,
   od,
   onSelectionChange,
+  replaySeed,
 }: {
   live: LiveGame;
   seed: string[] | null;
@@ -274,6 +277,10 @@ function LineBuilder({
    *  (see odForPoint in rules.ts) — only the gender ratio can be. */
   od: OD | undefined;
   onSelectionChange?: (ids: string[]) => void;
+  /** A lineup queued from the line-history viewer's separate tab (see
+   *  game-line-history.tsx) — applied to the current selection whenever its
+   *  nonce changes, same as an initial seed but arriving mid-lifecycle. */
+  replaySeed?: { nonce: number; lineup: string[] } | null;
 }) {
   const { game, roster, state, savedLines, points, actions } = live;
   const isMixed = !!game.startingGenderRatio;
@@ -423,6 +430,12 @@ function LineBuilder({
   useEffect(() => {
     setSelected((cur) => cur.filter((id) => eligibleIds.has(id)));
   }, [eligibleIds]);
+
+  useEffect(() => {
+    if (!replaySeed) return;
+    setSelected(replaySeed.lineup.filter((id) => eligibleIds.has(id)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [replaySeed?.nonce]);
 
   const toggle = (id: string) =>
     setSelected((cur) => {
@@ -1501,6 +1514,7 @@ function InProgressControls({
           genderRatio={nextGenderRatio}
           od={undefined}
           onSelectionChange={onNextLineDraftChange}
+          replaySeed={live.replaySeed}
         />
       </div>
     </div>
@@ -1659,7 +1673,7 @@ function InjuryFlow({ live }: { live: LiveGame }) {
 // ── Secondary controls (always available) ────────────────────────────────────────
 
 function SecondaryControls({ live }: { live: LiveGame }) {
-  const { state, actions, canUndo, canRedo, undoLabel, redoLabel, points } = live;
+  const { game, state, actions, canUndo, canRedo, undoLabel, redoLabel, points } = live;
   const [undoingFlip, setUndoingFlip] = useState(false);
   const [flipError, setFlipError] = useState<string | null>(null);
 
@@ -1704,6 +1718,14 @@ function SecondaryControls({ live }: { live: LiveGame }) {
           />
         )}
         <SmallButton label="End game" onClick={actions.endGame} />
+        <Link
+          href={`/games/${game.id}/history`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="rounded-md border border-line-strong px-3 py-1.5"
+        >
+          Line history ↗
+        </Link>
       </div>
       {flipError && <p className="text-xs text-red-600 dark:text-red-400">{flipError}</p>}
     </div>

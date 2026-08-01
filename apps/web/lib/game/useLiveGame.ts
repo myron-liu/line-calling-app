@@ -28,6 +28,7 @@ import { api, apiUrl } from "@/lib/api/client";
 import { supabase } from "@/lib/supabase/client";
 import { newId } from "@/lib/id";
 import {
+  clearPendingReplay,
   readGameConfig,
   readLastSyncedAt,
   readLog,
@@ -44,6 +45,7 @@ import {
   type GameFull,
   type RosterSnapshotEntry,
 } from "@/lib/storage/gameLog";
+import { keys } from "@/lib/storage/keys";
 import {
   dropPending,
   enqueue,
@@ -145,6 +147,11 @@ export interface LiveGame {
   savedLines: SavedLine[];
   /** Line pre-selected after an undo, so the coach can re-call it. */
   carryOver: string[] | null;
+  /** A lineup queued from the line-history viewer's separate tab (see
+   *  game-line-history.tsx) — `nonce` changes on every signal so the live
+   *  caller's effect reliably re-applies it even if it's the same lineup as
+   *  last time. Null until the first signal arrives. */
+  replaySeed: { nonce: number; lineup: string[] } | null;
   /** Whether there's anything for the undo/redo buttons to do — the UI
    *  should hide rather than disable them when these are false. */
   canUndo: boolean;
@@ -202,6 +209,31 @@ export function useLiveGame(gameId: string): LiveGameResult {
     status: "idle",
     lastSyncedAt: null,
   });
+  // A lineup selected in the line-history viewer, which opens in its own tab
+  // (see game-line-history.tsx) — that tab has no other way to reach this
+  // one, so it signals via localStorage and this listens for the native
+  // `storage` event, which only ever fires in *other* same-origin tabs.
+  // `nonce` changes on every signal (even a repeated identical lineup) so the
+  // live caller's effect reliably re-fires and applies it to whichever line
+  // builder is currently open.
+  const [replaySeed, setReplaySeed] = useState<{ nonce: number; lineup: string[] } | null>(
+    null,
+  );
+  useEffect(() => {
+    const replayKey = keys.gameReplay(gameId);
+    const handler = (e: StorageEvent) => {
+      if (e.key !== replayKey || !e.newValue) return;
+      try {
+        const lineup = JSON.parse(e.newValue) as string[];
+        setReplaySeed({ nonce: Date.now(), lineup });
+        clearPendingReplay(gameId);
+      } catch {
+        // Malformed value from some other source — ignore rather than crash.
+      }
+    };
+    window.addEventListener("storage", handler);
+    return () => window.removeEventListener("storage", handler);
+  }, [gameId]);
 
   const defaultMeta = (g: Game): GameMeta => ({
     halftimeReached: false,
@@ -659,6 +691,7 @@ export function useLiveGame(gameId: string): LiveGameResult {
       points: log.points,
       savedLines,
       carryOver,
+      replaySeed,
       canUndo,
       canRedo: pendingRedo !== null,
       undoLabel,
