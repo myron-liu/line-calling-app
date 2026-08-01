@@ -406,15 +406,17 @@ function LineBuilder({
     onSelectionChange?.(selected);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected]);
-  // Quick-lines tag filter (fixed situational vocabulary — see SITUATION_TAGS)
-  // defaults to a suggestion based on the game situation about to be played,
-  // but the coach can freely override it for this point; a new point remounts
-  // LineBuilder via its `key`, so the suggestion is recomputed fresh rather
-  // than fighting a manual choice mid-point. Only applied if at least one
-  // saved line/pod actually carries that tag — a team that hasn't adopted
-  // the situational tags yet should never have its whole quick-lines bar
-  // silently emptied out by a filter it never asked for.
-  const [tagFilter, setTagFilter] = useState<SituationTag | "all">(() => {
+  // Quick-lines tag filter. Any tag a line/pod carries can be filtered by —
+  // the fixed situational vocabulary (SITUATION_TAGS) plus whatever custom
+  // tags the team invented in the lines editor. It defaults to a suggestion
+  // based on the game situation about to be played, but the coach can freely
+  // override it for this point; a new point remounts LineBuilder via its
+  // `key`, so the suggestion is recomputed fresh rather than fighting a
+  // manual choice mid-point. Only applied if at least one saved line/pod
+  // actually carries that tag — a team that hasn't adopted the situational
+  // tags yet should never have its whole quick-lines bar silently emptied
+  // out by a filter it never asked for.
+  const [tagFilter, setTagFilter] = useState<string>(() => {
     const suggestion = suggestedSituationTag(
       game.gameCap,
       state.ourScore,
@@ -557,6 +559,21 @@ function LineBuilder({
   const visibleQuickLines =
     tagFilter === "all" ? quickLines : quickLines.filter((x) => x.line.tags?.includes(tagFilter));
 
+  // Filter chips: the fixed situational tags (always offered, in their canonical
+  // order) followed by any custom tags this tournament's lines/pods actually
+  // carry, so a team's own vocabulary is filterable too. Built off every saved
+  // line rather than just the ones fitting this point, so the chip row doesn't
+  // shuffle as the ratio changes point to point.
+  const filterTags = useMemo(() => {
+    const custom = new Set<string>();
+    for (const l of savedLines) {
+      for (const t of l.tags ?? []) {
+        if (!SITUATION_TAGS.includes(t as SituationTag)) custom.add(t);
+      }
+    }
+    return [...SITUATION_TAGS, ...[...custom].sort((a, b) => a.localeCompare(b))];
+  }, [savedLines]);
+
   // The exact saved line/pod that was on the field for the immediately
   // preceding point (if any exactly matches it), labeled "Just played" in the
   // quick-lines bar below. That label tracks any surviving overlap with the
@@ -671,6 +688,7 @@ function LineBuilder({
         onOpenChange={setQuickLinesOpen}
         tagFilter={tagFilter}
         onTagFilterChange={setTagFilter}
+        filterTags={filterTags}
       />
 
       <div className="flex items-center justify-between text-sm">
@@ -1313,6 +1331,7 @@ function SavedLinesBar({
   onOpenChange,
   tagFilter,
   onTagFilterChange,
+  filterTags,
 }: {
   lines: QuickLine[];
   appliedIds: Set<string>;
@@ -1323,8 +1342,11 @@ function SavedLinesBar({
   note: string | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  tagFilter: SituationTag | "all";
-  onTagFilterChange: (tag: SituationTag | "all") => void;
+  /** "all" for no filter, otherwise one of `filterTags`. */
+  tagFilter: string;
+  onTagFilterChange: (tag: string) => void;
+  /** Situational tags plus this tournament's own custom ones. */
+  filterTags: string[];
 }) {
   return (
     <details
@@ -1343,13 +1365,13 @@ function SavedLinesBar({
             active={tagFilter === "all"}
             onClick={() => onTagFilterChange("all")}
           />
-          {SITUATION_TAGS.map((t) => (
+          {filterTags.map((t) => (
             <TagFilterChip
               key={t}
               label={t}
               active={tagFilter === t}
               onClick={() => onTagFilterChange(t)}
-              activeClassName={SITUATION_TAG_COLOR[t]}
+              activeClassName={SITUATION_TAG_COLOR[t as SituationTag]}
             />
           ))}
         </div>
@@ -1391,20 +1413,6 @@ function SavedLinesBar({
                       {mmp}M/{wmp}W · {line.useCount ?? 0}×
                     </span>
                   </button>
-                  {line.tags && line.tags.length > 0 && (
-                    <span className="flex flex-wrap gap-1">
-                      {line.tags.map((t) => (
-                        <span
-                          key={t}
-                          className={`rounded-full border px-1.5 text-[10px] font-medium ${
-                            SITUATION_TAG_COLOR[t as SituationTag] ?? "border-current opacity-70"
-                          }`}
-                        >
-                          {t}
-                        </span>
-                      ))}
-                    </span>
-                  )}
                   {line.id === justPlayedId && (
                     <span className="text-[10px] font-medium opacity-80">Just played</span>
                   )}
