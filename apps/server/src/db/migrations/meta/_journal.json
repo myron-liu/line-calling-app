@@ -127,6 +127,20 @@
       "when": 1785648228598,
       "tag": "0017_yummy_legion",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1785650912390,
+      "tag": "0018_tiresome_banshee",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1785650929649,
+      "tag": "0019_magenta_stingray",
+      "breakpoints": true
     }
   ]
 }

@@ -888,6 +888,12 @@ function Tournaments({
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <h2 className="font-medium">Tournaments</h2>
+        <Link
+          href={`/teams/${team.id}/strategies`}
+          className="ml-auto mr-3 text-sm font-medium text-emerald-700 dark:text-emerald-400"
+        >
+          Strategy →
+        </Link>
         <button
           onClick={() => setAdding(true)}
           className="rounded bg-emerald-600 px-3 py-1.5 text-xs font-medium text-white"

@@ -291,6 +291,33 @@ export const routes: Route[] = [
   authedRoute("GET", "/teams/:id/strategy-tags", teamIdParam, async (_req, { id }) =>
     json(await q.listTeamStrategyTags(id!)),
   ),
+  authedRoute("POST", "/teams/:id/strategy-tags", teamIdParam, async (req, { id }) => {
+    const body = await parseBody(req, z.object({ name: z.string().min(1).max(40) }));
+    await q.addTeamStrategyTag(id!, body.name.trim());
+    return json(await q.listTeamStrategyTags(id!), 201);
+  }),
+  authedRoute(
+    "DELETE",
+    "/teams/:id/strategy-tags/:name",
+    teamIdParam,
+    async (_req, { id, name }) => {
+      // Points store tag strings, not references, so removing one that's still
+      // on a point would just leave it orphaned — and it'd reappear in the
+      // vocabulary anyway via the in-use union.
+      const current = await q.listTeamStrategyTags(id!);
+      const tag = current.find((t) => t.name === decodeURIComponent(name!));
+      if (tag && tag.pointsUsing > 0) {
+        return json(
+          {
+            error: `"${tag.name}" is on ${tag.pointsUsing} point${tag.pointsUsing === 1 ? "" : "s"}. Re-tag those points first.`,
+          },
+          409,
+        );
+      }
+      await q.removeTeamStrategyTag(id!, decodeURIComponent(name!));
+      return json(await q.listTeamStrategyTags(id!));
+    },
+  ),
   authedRoute("POST", "/teams/:id/players", teamIdParam, async (req, { id }) => {
     const body = await parseBody(
       req,
@@ -447,6 +474,7 @@ export const routes: Route[] = [
           color: lineColor.nullable().optional(),
           side: odPreference.nullable().optional(),
           tags: lineTags.optional(),
+          notes: z.string().max(500).nullable().optional(),
         }),
       );
       const line = await q.createSavedLine({ id: newId(), tournamentId: id!, ...body });
@@ -468,6 +496,7 @@ export const routes: Route[] = [
           side: odPreference.nullable().optional(),
           hidden: z.boolean().optional(),
           tags: lineTags.optional(),
+          notes: z.string().max(500).nullable().optional(),
         }),
       );
       const line = await q.updateSavedLine(id!, body);

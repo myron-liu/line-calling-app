@@ -132,6 +132,28 @@ export const tournamentPlayerTags = pgTable(
   (t) => [uniqueIndex("tournament_player_tags_unique").on(t.tournamentId, t.playerId)],
 );
 
+// A team's named strategies (§ strategy tags) — "Zone", "Cup", whatever they
+// call their looks. Team-scoped rather than per-tournament: a team's playbook
+// carries across everything it enters.
+//
+// This is the *managed* list, so a coach can set the vocabulary up before a
+// game rather than only inventing tags mid-point. It isn't the whole
+// vocabulary though: points carry tag strings directly, so listTeamStrategyTags
+// returns this unioned with whatever is actually in use — deleting a row here
+// can't retroactively un-tag the points that used it.
+export const teamStrategyTags = pgTable(
+  "team_strategy_tags",
+  {
+    id: id(),
+    teamId: text("team_id")
+      .notNull()
+      .references(() => teams.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("team_strategy_tags_unique").on(t.teamId, t.name)],
+);
+
 // ── Saved lines / pods ───────────────────────────────────────────────────────
 
 export const savedLines = pgTable("saved_lines", {
@@ -151,6 +173,9 @@ export const savedLines = pgTable("saved_lines", {
   // Free-form coach-assigned labels for organizing/filtering lines & pods in
   // the editor (e.g. "zone-D", "starters") — unlike color/side, not a fixed enum.
   tags: jsonb("tags").notNull().default([]).$type<string[]>(),
+  // Free-text reminder about how/when to use this line — shown on its chip in
+  // the live caller, where a coach reads it right before calling it.
+  notes: text("notes"),
   createdAt: createdAt(),
 });
 

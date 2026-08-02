@@ -103,9 +103,34 @@ export function deletePlayer(playerId: string): Promise<void> {
   return api.delete(`/players/${playerId}`);
 }
 
-/** Every strategy tag this team has used across all its games (§ strategy
- *  tags) — the vocabulary the live caller and the point editors offer, so a
- *  strategy named in one game keeps being offered in the next. */
-export function readTeamStrategyTags(teamId: string): Promise<string[]> {
-  return api.get<string[]>(`/teams/${teamId}/strategy-tags`);
+/** One strategy in the team's vocabulary, with how many points carry it —
+ *  the management page needs that to know what's safe to delete. */
+export interface StrategyTagInfo {
+  name: string;
+  pointsUsing: number;
+}
+
+/** A team's strategy vocabulary (§ strategy tags): names it has defined,
+ *  unioned with every tag actually in use on a point, so a strategy named in
+ *  one game keeps being offered in the next. */
+export function readTeamStrategyTags(teamId: string): Promise<StrategyTagInfo[]> {
+  return api.get<StrategyTagInfo[]>(`/teams/${teamId}/strategy-tags`);
+}
+
+export function addTeamStrategyTag(
+  teamId: string,
+  name: string,
+): Promise<StrategyTagInfo[]> {
+  return api.post<StrategyTagInfo[]>(`/teams/${teamId}/strategy-tags`, { name });
+}
+
+/** Rejected with a 409 if any point still carries it — points store tag
+ *  strings, so deleting one in use would just orphan them. */
+export function deleteTeamStrategyTag(
+  teamId: string,
+  name: string,
+): Promise<StrategyTagInfo[]> {
+  return api.delete<StrategyTagInfo[]>(
+    `/teams/${teamId}/strategy-tags/${encodeURIComponent(name)}`,
+  );
 }

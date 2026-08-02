@@ -44,6 +44,7 @@ import {
   points,
   savedLines,
   teamManagers,
+  teamStrategyTags,
   teams,
   tournamentPlayerTags,
   tournamentRoster,
@@ -631,6 +632,7 @@ export async function createSavedLine(input: {
   color?: LineColor | null;
   side?: ODPreference | null;
   tags?: string[];
+  notes?: string | null;
 }): Promise<SavedLine> {
   const existing = await db
     .select()
@@ -651,6 +653,7 @@ export async function createSavedLine(input: {
         color: input.color,
         side: input.side,
         tags: input.tags ?? [],
+        notes: input.notes,
       })
       .where(eq(savedLines.id, match.id))
       .returning();
@@ -667,6 +670,7 @@ export async function createSavedLine(input: {
       color: input.color,
       side: input.side,
       tags: input.tags ?? [],
+      notes: input.notes,
     })
     .returning();
   return toSavedLine(row!);
@@ -689,6 +693,7 @@ export async function updateSavedLine(
     side?: ODPreference | null;
     hidden?: boolean;
     tags?: string[];
+    notes?: string | null;
   },
 ): Promise<SavedLine | null> {
   const [existing] = await db.select().from(savedLines).where(eq(savedLines.id, id));
@@ -757,6 +762,7 @@ function toSavedLine(row: typeof savedLines.$inferSelect): SavedLine {
     side: (row.side as ODPreference) ?? undefined,
     hidden: row.hidden,
     tags: row.tags.length > 0 ? row.tags : undefined,
+    notes: row.notes ?? undefined,
     createdAt: row.createdAt.toISOString(),
   };
 }
@@ -1038,21 +1044,73 @@ export async function listTournamentGames(
   return Promise.all(rows.map(attachLiveScore));
 }
 
+/** One strategy in a team's vocabulary, with how much of the record it
+ *  actually accounts for — the management page needs to know whether
+ *  deleting it would orphan tagged points. */
+export interface StrategyTagInfo {
+  name: string;
+  /** Completed or in-progress points across the team's games carrying it. */
+  pointsUsing: number;
+}
+
 /**
- * Every strategy tag this team has ever used, across all its games (§ strategy
- * tags). There's no managed vocabulary anywhere — a tag exists as long as some
- * point carries it — so "the team's strategies" is exactly this distinct set,
- * and naming one in a past game keeps offering it in the next.
+ * A team's strategy vocabulary (§ strategy tags): the names it has explicitly
+ * defined, unioned with every tag actually in use on a point.
+ *
+ * The union matters because points store tag strings directly, not references
+ * — deleting a managed row can't retroactively un-tag the points that used
+ * it, so a tag in use keeps being offered whether or not it's on the list.
  */
-export async function listTeamStrategyTags(teamId: string): Promise<string[]> {
-  const rows = await db
-    .select({ strategyTags: points.strategyTags })
-    .from(points)
-    .innerJoin(games, eq(points.gameId, games.id))
-    .where(eq(games.teamId, teamId));
-  const seen = new Set<string>();
-  for (const r of rows) for (const t of r.strategyTags ?? []) seen.add(t);
-  return [...seen].sort((a, b) => a.localeCompare(b));
+export async function listTeamStrategyTags(
+  teamId: string,
+): Promise<StrategyTagInfo[]> {
+  const [pointRows, managed] = await Promise.all([
+    db
+      .select({ strategyTags: points.strategyTags })
+      .from(points)
+      .innerJoin(games, eq(points.gameId, games.id))
+      .where(eq(games.teamId, teamId)),
+    db
+      .select({ name: teamStrategyTags.name })
+      .from(teamStrategyTags)
+      .where(eq(teamStrategyTags.teamId, teamId)),
+  ]);
+
+  const usage = new Map<string, number>();
+  for (const r of pointRows) {
+    for (const t of r.strategyTags ?? []) usage.set(t, (usage.get(t) ?? 0) + 1);
+  }
+  for (const m of managed) if (!usage.has(m.name)) usage.set(m.name, 0);
+
+  return [...usage.entries()]
+    .map(([name, pointsUsing]) => ({ name, pointsUsing }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export async function addTeamStrategyTag(
+  teamId: string,
+  name: string,
+): Promise<void> {
+  const existing = await listTeamStrategyTags(teamId);
+  if (existing.some((t) => normalizeName(t.name) === normalizeName(name))) {
+    throw new DuplicateError(`"${name.trim()}" is already one of your strategies.`);
+  }
+  await db
+    .insert(teamStrategyTags)
+    .values({ id: `${teamId}:${name}`, teamId, name })
+    .onConflictDoNothing();
+}
+
+/** Removes a strategy from the managed list. Points already tagged with it
+ *  keep their tag — and keep it in the offered vocabulary — so the route
+ *  layer refuses to delete one that's still in use. */
+export async function removeTeamStrategyTag(
+  teamId: string,
+  name: string,
+): Promise<void> {
+  await db
+    .delete(teamStrategyTags)
+    .where(and(eq(teamStrategyTags.teamId, teamId), eq(teamStrategyTags.name, name)));
 }
 
 export interface TournamentPlayerStats {

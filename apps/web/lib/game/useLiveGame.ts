@@ -244,7 +244,7 @@ export function useLiveGame(gameId: string): LiveGameResult {
     let cancelled = false;
     readTeamStrategyTags(game.teamId)
       .then((tags) => {
-        if (!cancelled) setTeamStrategyTags(tags);
+        if (!cancelled) setTeamStrategyTags(tags.map((t) => t.name));
       })
       .catch(() => {});
     return () => {

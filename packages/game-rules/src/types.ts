@@ -147,6 +147,9 @@ export interface SavedLine {
    *  the editor (e.g. "zone-D", "starters") — unlike color/side, not a fixed
    *  enum. Undefined/empty = no tags. */
   tags?: string[];
+  /** Free-text reminder about how or when to use this line — shown on its
+   *  chip in the live caller, where a coach reads it just before calling it. */
+  notes?: string;
   createdAt: string;
 }
 

@@ -47,6 +47,7 @@ export function LinesEditor({ tournamentId }: { tournamentId: string }) {
   const [side, setSide] = useState<ODPreference>("both");
   const [tags, setTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState("");
+  const [notes, setNotes] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<SavedLine | null>(null);
   const [activeTagFilters, setActiveTagFilters] = useState<Set<string>>(new Set());
@@ -138,6 +139,7 @@ export function LinesEditor({ tournamentId }: { tournamentId: string }) {
     setSide("both");
     setTags([]);
     setTagInput("");
+    setNotes("");
     setEditingId(null);
   };
 
@@ -147,6 +149,7 @@ export function LinesEditor({ tournamentId }: { tournamentId: string }) {
     setColor(line.color ?? null);
     setSide(line.side ?? "both");
     setTags(line.tags ?? []);
+    setNotes(line.notes ?? "");
     setTagInput("");
     setEditingId(line.id);
     document
@@ -179,9 +182,15 @@ export function LinesEditor({ tournamentId }: { tournamentId: string }) {
           color,
           side,
           tags,
+          notes: notes.trim() || null,
         });
       } else {
-        await createSavedLine(tournamentId, name.trim(), selected, { color, side, tags });
+        await createSavedLine(tournamentId, name.trim(), selected, {
+          color,
+          side,
+          tags,
+          notes: notes.trim() || null,
+        });
       }
       refresh();
       resetBuilder();
@@ -377,6 +386,20 @@ export function LinesEditor({ tournamentId }: { tournamentId: string }) {
             )}
           </div>
         )}
+
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-muted">
+            Notes <span className="text-faint">(optional)</span>
+          </span>
+          <textarea
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            rows={2}
+            maxLength={500}
+            placeholder="When to call this — e.g. “vs a 3-man cup, force forehand”"
+            className="rounded border border-line-strong px-2 py-1.5"
+          />
+        </label>
 
         {nameTaken && (
           <p className="text-xs text-amber-600 dark:text-amber-400">

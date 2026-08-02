@@ -27,7 +27,12 @@ export function createSavedLine(
   tournamentId: string,
   name: string,
   playerIds: string[],
-  options?: { color?: LineColor | null; side?: ODPreference | null; tags?: string[] },
+  options?: {
+    color?: LineColor | null;
+    side?: ODPreference | null;
+    tags?: string[];
+    notes?: string | null;
+  },
 ): Promise<SavedLine> {
   return api.post<SavedLine>(`/tournaments/${tournamentId}/saved-lines`, {
     name,
@@ -45,6 +50,7 @@ export function updateSavedLine(
     side?: ODPreference | null;
     hidden?: boolean;
     tags?: string[];
+    notes?: string | null;
   },
 ): Promise<SavedLine> {
   return api.patch<SavedLine>(`/saved-lines/${id}`, patch);

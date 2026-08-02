@@ -1628,6 +1628,11 @@ function SavedLinesBar({
                       {mmp}M/{wmp}W · {line.useCount ?? 0}×
                     </span>
                   </span>
+                  {line.notes && (
+                    <span className="max-w-[16rem] text-left text-[10px] font-normal italic opacity-80">
+                      {line.notes}
+                    </span>
+                  )}
                   {line.id === justPlayedId && (
                     <span className="text-[10px] font-medium opacity-80">Just played</span>
                   )}
