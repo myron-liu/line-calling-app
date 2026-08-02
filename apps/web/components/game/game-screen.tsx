@@ -283,6 +283,7 @@ function Recap({ live }: { live: LiveGame }) {
       <LineHistory points={points} byId={byId} onEditPoint={actions.editPoint} roster={roster} />
 
       <PointsPlayedTables
+        isMixed={!!game.startingGenderRatio}
         roster={roster}
         pointsPlayed={state.pointsPlayed}
         playerOutcomes={playerOutcomes}
@@ -540,11 +541,15 @@ function NumCell({ children }: { children: React.ReactNode }) {
 }
 
 function PointsPlayedTables({
+  isMixed,
   roster,
   pointsPlayed,
   playerOutcomes,
   statTotals,
 }: {
+  /** Open and Women teams are single-gender by definition, so splitting the
+   *  roster by genderMatch would just leave one table and one empty one. */
+  isMixed: boolean;
   roster: RosterSnapshotEntry[];
   pointsPlayed: Record<string, number>;
   playerOutcomes: Record<string, PlayerPointOutcomes>;
@@ -552,29 +557,18 @@ function PointsPlayedTables({
 }) {
   const [sort, setSort] = useState<StatSort>({ key: "count", dir: "desc" });
   const onSort = (key: StatSortKey) => setSort((cur) => toggleStatSort(cur, key));
+  const shared = { roster, pointsPlayed, playerOutcomes, statTotals, sort, onSort };
+
+  if (!isMixed) {
+    return <PointsPlayedTable gender={null} {...shared} />;
+  }
   return (
     <div className="flex flex-wrap gap-3">
       <div className="min-w-[280px] flex-1">
-        <PointsPlayedTable
-          gender="MMP"
-          roster={roster}
-          pointsPlayed={pointsPlayed}
-          playerOutcomes={playerOutcomes}
-          statTotals={statTotals}
-          sort={sort}
-          onSort={onSort}
-        />
+        <PointsPlayedTable gender="MMP" {...shared} />
       </div>
       <div className="min-w-[280px] flex-1">
-        <PointsPlayedTable
-          gender="WMP"
-          roster={roster}
-          pointsPlayed={pointsPlayed}
-          playerOutcomes={playerOutcomes}
-          statTotals={statTotals}
-          sort={sort}
-          onSort={onSort}
-        />
+        <PointsPlayedTable gender="WMP" {...shared} />
       </div>
     </div>
   );
@@ -693,7 +687,9 @@ function PointsPlayedTable({
   sort,
   onSort,
 }: {
-  gender: GenderMatch;
+  /** Null for a single-gender team: one table over the whole roster, headed
+   *  "Player" rather than a genderMatch that carries no information. */
+  gender: GenderMatch | null;
   roster: RosterSnapshotEntry[];
   pointsPlayed: Record<string, number>;
   playerOutcomes: Record<string, PlayerPointOutcomes>;
@@ -702,7 +698,7 @@ function PointsPlayedTable({
   onSort: (key: StatSortKey) => void;
 }) {
   const rows: StatRow[] = roster
-    .filter((p) => p.genderMatch === gender)
+    .filter((p) => gender === null || p.genderMatch === gender)
     .map((p) => {
       const o = playerOutcomes[p.playerId];
       return {
@@ -718,15 +714,24 @@ function PointsPlayedTable({
     .sort((a, b) => compareStatRows(a, b, sort));
 
   const headerTone =
-    gender === "MMP"
-      ? "text-sky-600 dark:text-sky-400"
-      : "text-rose-600 dark:text-rose-400";
+    gender === null
+      ? undefined
+      : gender === "MMP"
+        ? "text-sky-600 dark:text-sky-400"
+        : "text-rose-600 dark:text-rose-400";
 
   return (
     <table className="w-full text-sm">
       <thead>
         <tr>
-          <SortableTh label={gender} sortKey="name" sort={sort} onSort={onSort} align="left" toneClassName={headerTone} />
+          <SortableTh
+            label={gender ?? "Player"}
+            sortKey="name"
+            sort={sort}
+            onSort={onSort}
+            align="left"
+            toneClassName={headerTone}
+          />
           {STAT_COLUMNS.map((c) => (
             <SortableTh
               key={c.key}
