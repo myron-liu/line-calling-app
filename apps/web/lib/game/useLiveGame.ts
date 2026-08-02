@@ -16,6 +16,7 @@ import {
   redoAction as replayRedo,
   removeStatEvent,
   undoLastPoint,
+  usedStrategyTags,
   type Game,
   type GameLogState,
   type GameMeta,
@@ -68,6 +69,7 @@ import {
   resolveFlip as resolveFlipApi,
   undoFlip as undoFlipApi,
 } from "@/lib/storage/games";
+import { readTeamStrategyTags } from "@/lib/storage/teams";
 
 /** Saved lines are tournament-scoped (§4.3). Every game reachable from the
  *  UI is created from within a tournament, so this is only undefined for a
@@ -152,6 +154,11 @@ export interface LiveGame {
   /** Points + meta together, for engine calls that need the whole log — e.g.
    *  looking ahead to the next point under each result (nextPointIfResult). */
   log: GameLogState;
+  /** Strategy tags to offer when tagging a point: everything this team has
+   *  used across all its games, merged with anything named in this one that
+   *  hasn't reached the server yet. Entirely coach-defined — there are no
+   *  built-in strategies. */
+  strategyVocabulary: string[];
   savedLines: SavedLine[];
   /** Line pre-selected after an undo, so the coach can re-call it. */
   carryOver: string[] | null;
@@ -220,6 +227,7 @@ export function useLiveGame(gameId: string): LiveGameResult {
   const [roster, setRoster] = useState<RosterSnapshotEntry[]>([]);
   const [log, setLog] = useState<GameLogState | null>(null);
   const [savedLines, setSavedLines] = useState<SavedLine[]>([]);
+  const [teamStrategyTags, setTeamStrategyTags] = useState<string[]>([]);
   const [carryOver, setCarryOver] = useState<string[] | null>(null);
   const [pendingRedo, setPendingRedo] = useState<RedoAction | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -228,6 +236,22 @@ export function useLiveGame(gameId: string): LiveGameResult {
     status: "idle",
     lastSyncedAt: null,
   });
+  // The team's strategy vocabulary, fetched once. Best-effort: on a sideline
+  // with no signal the coach still gets this game's own tags, and can name
+  // new ones — they just won't see ones from other games until back online.
+  useEffect(() => {
+    if (!game?.teamId) return;
+    let cancelled = false;
+    readTeamStrategyTags(game.teamId)
+      .then((tags) => {
+        if (!cancelled) setTeamStrategyTags(tags);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [game?.teamId]);
+
   const defaultMeta = (g: Game): GameMeta => ({
     halftimeReached: false,
     ourTimeoutsRemaining: g.timeoutsPerHalf,
@@ -713,6 +737,9 @@ export function useLiveGame(gameId: string): LiveGameResult {
       state,
       points: log.points,
       log,
+      strategyVocabulary: Array.from(
+        new Set([...teamStrategyTags, ...usedStrategyTags(log.points)]),
+      ).sort((a, b) => a.localeCompare(b)),
       savedLines,
       carryOver,
       canUndo,

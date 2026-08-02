@@ -1038,6 +1038,23 @@ export async function listTournamentGames(
   return Promise.all(rows.map(attachLiveScore));
 }
 
+/**
+ * Every strategy tag this team has ever used, across all its games (§ strategy
+ * tags). There's no managed vocabulary anywhere — a tag exists as long as some
+ * point carries it — so "the team's strategies" is exactly this distinct set,
+ * and naming one in a past game keeps offering it in the next.
+ */
+export async function listTeamStrategyTags(teamId: string): Promise<string[]> {
+  const rows = await db
+    .select({ strategyTags: points.strategyTags })
+    .from(points)
+    .innerJoin(games, eq(points.gameId, games.id))
+    .where(eq(games.teamId, teamId));
+  const seen = new Set<string>();
+  for (const r of rows) for (const t of r.strategyTags ?? []) seen.add(t);
+  return [...seen].sort((a, b) => a.localeCompare(b));
+}
+
 export interface TournamentPlayerStats {
   playerId: string;
   name: string;

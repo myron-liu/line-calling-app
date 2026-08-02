@@ -102,3 +102,10 @@ export function updatePlayer(
 export function deletePlayer(playerId: string): Promise<void> {
   return api.delete(`/players/${playerId}`);
 }
+
+/** Every strategy tag this team has used across all its games (§ strategy
+ *  tags) — the vocabulary the live caller and the point editors offer, so a
+ *  strategy named in one game keeps being offered in the next. */
+export function readTeamStrategyTags(teamId: string): Promise<string[]> {
+  return api.get<string[]>(`/teams/${teamId}/strategy-tags`);
+}

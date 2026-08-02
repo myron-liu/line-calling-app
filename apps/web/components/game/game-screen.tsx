@@ -12,7 +12,6 @@ import type {
   PointEdit,
 } from "@shared/game-rules";
 import {
-  usedStrategyTags,
   defensiveEfficiency,
   efficiencyFromPlusMinus,
   emptyStatTotals,
@@ -284,7 +283,13 @@ function Recap({ live }: { live: LiveGame }) {
 
       <StrategySummary points={points} />
 
-      <LineHistory points={points} byId={byId} onEditPoint={actions.editPoint} roster={roster} />
+      <LineHistory
+        points={points}
+        byId={byId}
+        roster={roster}
+        strategyVocabulary={live.strategyVocabulary}
+        onEditPoint={actions.editPoint}
+      />
 
       <PointsPlayedTables
         isMixed={!!game.startingGenderRatio}
@@ -339,11 +344,13 @@ function LineHistory({
   points,
   byId,
   roster,
+  strategyVocabulary,
   onEditPoint,
 }: {
   points: Point[];
   byId: Map<string, RosterSnapshotEntry>;
   roster: RosterSnapshotEntry[];
+  strategyVocabulary: string[];
   onEditPoint: (pointId: string, edit: PointEdit) => void;
 }) {
   const [editing, setEditing] = useState<Point | null>(null);
@@ -434,7 +441,7 @@ function LineHistory({
         <PointEditModal
           point={editing}
           roster={roster}
-          strategyVocabulary={usedStrategyTags(points)}
+          strategyVocabulary={strategyVocabulary}
           onClose={() => setEditing(null)}
           onSave={(edit) => {
             onEditPoint(editing.id, edit);

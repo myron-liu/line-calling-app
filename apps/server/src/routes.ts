@@ -288,6 +288,9 @@ export const routes: Route[] = [
   authedRoute("GET", "/teams/:id/players", teamIdParam, async (_req, { id }) =>
     json(await q.listPlayers(id!)),
   ),
+  authedRoute("GET", "/teams/:id/strategy-tags", teamIdParam, async (_req, { id }) =>
+    json(await q.listTeamStrategyTags(id!)),
+  ),
   authedRoute("POST", "/teams/:id/players", teamIdParam, async (req, { id }) => {
     const body = await parseBody(
       req,

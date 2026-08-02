@@ -1735,11 +1735,6 @@ function InProgressControls({
   const pointStartedAt = currentPoint?.startedAt;
   const [scoringOpen, setScoringOpen] = useState(false);
 
-  // Purely what this game has already used — there are no built-in
-  // strategies, so the vocabulary starts empty and grows as the coach names
-  // their own.
-  const strategyVocabulary = useMemo(() => usedStrategyTags(points), [points]);
-
   const record = (scorer: PointResult, scoring?: Scoring) => {
     onResultRecorded(scorer);
     actions.recordResult(scorer, scoring);
@@ -1770,7 +1765,7 @@ function InProgressControls({
 
       <StrategyPicker
         tags={currentPoint?.strategyTags ?? []}
-        vocabulary={strategyVocabulary}
+        vocabulary={live.strategyVocabulary}
         onChange={(tags) =>
           currentPoint && actions.editPoint(currentPoint.id, { strategyTags: tags })
         }

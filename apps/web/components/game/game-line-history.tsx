@@ -1,12 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import {
-  ratioCounts,
-  ratioForPoint,
-  usedStrategyTags,
-  type Point,
-} from "@shared/game-rules";
+import { ratioCounts, ratioForPoint, type Point } from "@shared/game-rules";
 import type { LiveGame } from "@/lib/game/useLiveGame";
 import { isRosterActive, type RosterSnapshotEntry } from "@/lib/storage/gameLog";
 import { displayName, sortRoster } from "@/lib/player-display";
@@ -25,7 +20,6 @@ export function LineHistory({
 }) {
   const { game, roster, points, state, actions } = live;
   const [editing, setEditing] = useState<Point | null>(null);
-  const strategyVocabulary = useMemo(() => usedStrategyTags(points), [points]);
 
   const byId = useMemo(
     () => new Map(roster.map((p) => [p.playerId, p])),
@@ -99,7 +93,7 @@ export function LineHistory({
         <PointEditModal
           point={editing}
           roster={roster}
-          strategyVocabulary={strategyVocabulary}
+          strategyVocabulary={live.strategyVocabulary}
           onClose={() => setEditing(null)}
           onSave={(edit) => {
             actions.editPoint(editing.id, edit);

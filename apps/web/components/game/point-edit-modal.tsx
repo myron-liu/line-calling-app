@@ -66,6 +66,17 @@ export function PointEditModal({
     return sortRoster(roster.filter((p) => ids.has(p.playerId)));
   }, [lineup, events, scoring, point.substitutions, roster]);
 
+  /** Names a new strategy and applies it to this point in one go — the tag
+   *  vocabulary is nothing but the tags in use, so creating and applying are
+   *  the same action. */
+  const addStrategyTag = () => {
+    const name = newTag.trim();
+    if (name && !strategyTags.includes(name)) {
+      setStrategyTags((cur) => [...cur, name]);
+    }
+    setNewTag("");
+  };
+
   const save = () =>
     onSave({
       lineup,
@@ -170,7 +181,12 @@ export function PointEditModal({
       </Section>
 
       <Section label="Strategy">
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
+          {strategyVocabulary.length === 0 && strategyTags.length === 0 && (
+            <span className="text-sm text-faint">
+              Name whatever was being run —
+            </span>
+          )}
           {Array.from(new Set([...strategyVocabulary, ...strategyTags])).map((tag) => (
             <button
               key={tag}
@@ -194,17 +210,17 @@ export function PointEditModal({
           <input
             value={newTag}
             onChange={(e) => setNewTag(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key !== "Enter") return;
-              const name = newTag.trim();
-              if (name && !strategyTags.includes(name)) {
-                setStrategyTags((cur) => [...cur, name]);
-              }
-              setNewTag("");
-            }}
+            onKeyDown={(e) => e.key === "Enter" && addStrategyTag()}
             placeholder="New strategy…"
             className="flex-1 rounded border border-line-strong px-2 py-1 text-sm"
           />
+          <button
+            onClick={addStrategyTag}
+            disabled={!newTag.trim()}
+            className="rounded bg-emerald-600 px-3 py-1 text-sm font-medium text-white disabled:bg-disabled"
+          >
+            Add
+          </button>
         </div>
       </Section>
 
