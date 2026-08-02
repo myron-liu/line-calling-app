@@ -153,11 +153,6 @@ export function teamPointOutcomes(points: Point[]): TeamPointOutcomes {
   return out;
 }
 
-/** Strategy tags always offered in the live caller, before the team has
- *  invented any of its own (§ strategy tags). Not a closed set — anything a
- *  coach types becomes just as real as these. */
-export const DEFAULT_STRATEGY_TAGS = ["Zone", "Person"] as const;
-
 /** One strategy's record, split the same way the whole game's is — so O% and
  *  D% for it come straight from offensiveEfficiency/defensiveEfficiency. */
 export interface StrategyOutcomes {
@@ -194,7 +189,8 @@ export function strategyOutcomes(points: Point[]): StrategyOutcomes[] {
     .sort((a, b) => b.pointsPlayed - a.pointsPlayed || a.tag.localeCompare(b.tag));
 }
 
-/** Every strategy tag in use, for offering them again on the next point. */
+/** Every strategy tag in use — the whole vocabulary, since there are no
+ *  built-in ones: a team's strategies are whatever it has named itself. */
 export function usedStrategyTags(points: Point[]): string[] {
   const seen = new Set<string>();
   for (const p of points) for (const t of p.strategyTags ?? []) seen.add(t);

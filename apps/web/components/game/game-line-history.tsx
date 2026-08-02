@@ -2,7 +2,6 @@
 
 import { useMemo, useState } from "react";
 import {
-  DEFAULT_STRATEGY_TAGS,
   ratioCounts,
   ratioForPoint,
   usedStrategyTags,
@@ -26,10 +25,7 @@ export function LineHistory({
 }) {
   const { game, roster, points, state, actions } = live;
   const [editing, setEditing] = useState<Point | null>(null);
-  const strategyVocabulary = useMemo(
-    () => Array.from(new Set([...DEFAULT_STRATEGY_TAGS, ...usedStrategyTags(points)])),
-    [points],
-  );
+  const strategyVocabulary = useMemo(() => usedStrategyTags(points), [points]);
 
   const byId = useMemo(
     () => new Map(roster.map((p) => [p.playerId, p])),

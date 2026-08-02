@@ -12,7 +12,6 @@ import type {
   PointEdit,
 } from "@shared/game-rules";
 import {
-  DEFAULT_STRATEGY_TAGS,
   usedStrategyTags,
   defensiveEfficiency,
   efficiencyFromPlusMinus,
@@ -435,9 +434,7 @@ function LineHistory({
         <PointEditModal
           point={editing}
           roster={roster}
-          strategyVocabulary={Array.from(
-            new Set([...DEFAULT_STRATEGY_TAGS, ...usedStrategyTags(points)]),
-          )}
+          strategyVocabulary={usedStrategyTags(points)}
           onClose={() => setEditing(null)}
           onSave={(edit) => {
             onEditPoint(editing.id, edit);

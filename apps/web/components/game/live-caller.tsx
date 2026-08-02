@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   SITUATION_TAGS,
-  DEFAULT_STRATEGY_TAGS,
   currentCapStatus,
   defensiveEfficiency,
   genderStateLabel,
@@ -1736,15 +1735,10 @@ function InProgressControls({
   const pointStartedAt = currentPoint?.startedAt;
   const [scoringOpen, setScoringOpen] = useState(false);
 
-  // Tags already used this game, plus the two everyone starts with — the
-  // vocabulary grows by use rather than being managed anywhere.
-  const strategyVocabulary = useMemo(
-    () =>
-      Array.from(
-        new Set([...DEFAULT_STRATEGY_TAGS, ...usedStrategyTags(points)]),
-      ),
-    [points],
-  );
+  // Purely what this game has already used — there are no built-in
+  // strategies, so the vocabulary starts empty and grows as the coach names
+  // their own.
+  const strategyVocabulary = useMemo(() => usedStrategyTags(points), [points]);
 
   const record = (scorer: PointResult, scoring?: Scoring) => {
     onResultRecorded(scorer);
@@ -1978,7 +1972,12 @@ function StrategyPicker({
       <p className="text-xs font-medium uppercase tracking-wide text-faint">
         Strategy
       </p>
-      <div className="flex flex-wrap gap-1.5">
+      <div className="flex flex-wrap items-center gap-1.5">
+        {vocabulary.length === 0 && !adding && (
+          <span className="text-sm text-faint">
+            Name whatever you&rsquo;re running —
+          </span>
+        )}
         {vocabulary.map((tag) => (
           <button
             key={tag}
