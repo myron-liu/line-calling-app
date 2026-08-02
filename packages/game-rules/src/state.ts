@@ -429,6 +429,7 @@ export interface PointEdit {
   result?: PointResult;
   scoring?: Scoring | null;
   statEvents?: StatEvent[];
+  strategyTags?: string[];
 }
 
 /**
@@ -480,6 +481,7 @@ export function editPoint(
           ? undefined
           : (edit.scoring ?? point.scoring),
     statEvents: edit.statEvents ? [...edit.statEvents] : point.statEvents,
+    strategyTags: edit.strategyTags ? [...edit.strategyTags] : point.strategyTags,
   };
 
   const points = state.points.map((p, i) => (i === idx ? updated : p));

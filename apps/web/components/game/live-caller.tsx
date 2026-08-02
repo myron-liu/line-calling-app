@@ -3,8 +3,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   SITUATION_TAGS,
+  DEFAULT_STRATEGY_TAGS,
   currentCapStatus,
+  defensiveEfficiency,
   genderStateLabel,
+  offensiveEfficiency,
+  strategyOutcomes,
+  usedStrategyTags,
   nextPointIfResult,
   playersOnField,
   playerSecondsPlayed,
@@ -15,6 +20,7 @@ import {
   validateLine,
   type GenderRatio,
   type OD,
+  type Point,
   type PointResult,
   type SavedLine,
   type Scoring,
@@ -1730,6 +1736,16 @@ function InProgressControls({
   const pointStartedAt = currentPoint?.startedAt;
   const [scoringOpen, setScoringOpen] = useState(false);
 
+  // Tags already used this game, plus the two everyone starts with — the
+  // vocabulary grows by use rather than being managed anywhere.
+  const strategyVocabulary = useMemo(
+    () =>
+      Array.from(
+        new Set([...DEFAULT_STRATEGY_TAGS, ...usedStrategyTags(points)]),
+      ),
+    [points],
+  );
+
   const record = (scorer: PointResult, scoring?: Scoring) => {
     onResultRecorded(scorer);
     actions.recordResult(scorer, scoring);
@@ -1757,6 +1773,14 @@ function InProgressControls({
       )}
 
       <CurrentLineDisplay players={currentLine} />
+
+      <StrategyPicker
+        tags={currentPoint?.strategyTags ?? []}
+        vocabulary={strategyVocabulary}
+        onChange={(tags) =>
+          currentPoint && actions.editPoint(currentPoint.id, { strategyTags: tags })
+        }
+      />
 
       <StatRecorder
         players={currentLine}
@@ -1914,6 +1938,171 @@ function OutcomeTab({
       <span className="text-xs text-faint">{picked}/7 picked</span>
     </button>
   );
+}
+
+// ── Strategy tags (§ strategy tags) ─────────────────────────────────────────
+
+/**
+ * What we're running this point — Zone, Person, or whatever the team calls
+ * its own looks. Multiple tags are allowed: a point can be both "Zone" and
+ * "Junk", and it counts toward each one's efficiency separately.
+ *
+ * Tagging edits the in-progress point directly, so it's equally available
+ * afterward from the line history's edit modal — a coach who forgets mid-point
+ * can label it once the dust settles.
+ */
+function StrategyPicker({
+  tags,
+  vocabulary,
+  onChange,
+}: {
+  tags: string[];
+  vocabulary: string[];
+  onChange: (tags: string[]) => void;
+}) {
+  const [adding, setAdding] = useState(false);
+  const [draft, setDraft] = useState("");
+
+  const toggle = (tag: string) =>
+    onChange(tags.includes(tag) ? tags.filter((t) => t !== tag) : [...tags, tag]);
+
+  const addNew = () => {
+    const name = draft.trim();
+    if (name && !tags.includes(name)) onChange([...tags, name]);
+    setDraft("");
+    setAdding(false);
+  };
+
+  return (
+    <div className="space-y-2 rounded-lg border border-line p-2">
+      <p className="text-xs font-medium uppercase tracking-wide text-faint">
+        Strategy
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        {vocabulary.map((tag) => (
+          <button
+            key={tag}
+            onClick={() => toggle(tag)}
+            aria-pressed={tags.includes(tag)}
+            className={`rounded-full border px-2.5 py-1 text-sm ${
+              tags.includes(tag)
+                ? "border-violet-500 bg-violet-100 font-medium text-violet-800 dark:bg-violet-500/20 dark:text-violet-300"
+                : "border-line text-muted"
+            }`}
+          >
+            {tag}
+          </button>
+        ))}
+        {!adding && (
+          <button
+            onClick={() => setAdding(true)}
+            className="rounded-full border border-dashed border-line-strong px-2.5 py-1 text-sm text-muted"
+          >
+            + New
+          </button>
+        )}
+      </div>
+      {adding && (
+        <div className="flex gap-2">
+          <input
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && addNew()}
+            placeholder="e.g. Junk, Clam"
+            autoFocus
+            className="flex-1 rounded border border-line-strong px-2 py-1 text-sm"
+          />
+          <button
+            onClick={addNew}
+            className="rounded bg-emerald-600 px-3 py-1 text-sm font-medium text-white"
+          >
+            Add
+          </button>
+          <button
+            onClick={() => {
+              setAdding(false);
+              setDraft("");
+            }}
+            className="rounded-md border border-line-strong px-3 py-1 text-sm"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Hold/break efficiency per strategy, for the line-history tab and the
+ *  recap. Renders nothing until at least one point has been tagged. */
+export function StrategySummary({ points }: { points: Point[] }) {
+  const rows = useMemo(() => strategyOutcomes(points), [points]);
+  if (rows.length === 0) return null;
+  return (
+    <div className="space-y-1">
+      <p className="text-xs font-semibold uppercase tracking-wide text-faint">
+        By strategy
+      </p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-xs uppercase tracking-wide text-faint">
+              <th className="border-b border-line pb-1 text-left font-semibold">
+                Strategy
+              </th>
+              <th className="border-b border-line pb-1 text-right font-semibold" title="Points played on this strategy">
+                Pts
+              </th>
+              <th className="border-b border-line pb-1 text-right font-semibold" title="Offensive efficiency — share of its O points held">
+                O%
+              </th>
+              <th className="border-b border-line pb-1 text-right font-semibold" title="Defensive efficiency — share of its D points broken">
+                D%
+              </th>
+              <th className="border-b border-line pb-1 text-right font-semibold" title="Holds / O points on this strategy">
+                Holds
+              </th>
+              <th className="border-b border-line pb-1 text-right font-semibold" title="Breaks / D points on this strategy">
+                Breaks
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(({ tag, outcomes, pointsPlayed }) => {
+              const oPts = outcomes.holds + outcomes.broken;
+              const dPts = outcomes.breaks + outcomes.opponentHolds;
+              return (
+                <tr key={tag}>
+                  <td className="border-b border-line py-1 font-medium">{tag}</td>
+                  <td className="border-b border-line py-1 text-right tabular-nums text-muted">
+                    {pointsPlayed}
+                  </td>
+                  <td className="border-b border-line py-1 text-right tabular-nums">
+                    {formatEfficiency(offensiveEfficiency(outcomes))}
+                  </td>
+                  <td className="border-b border-line py-1 text-right tabular-nums">
+                    {formatEfficiency(defensiveEfficiency(outcomes))}
+                  </td>
+                  <td className="border-b border-line py-1 text-right tabular-nums text-muted">
+                    {outcomes.holds}/{oPts}
+                  </td>
+                  <td className="border-b border-line py-1 text-right tabular-nums text-muted">
+                    {outcomes.breaks}/{dPts}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/** A dash rather than "0%" when no points of that kind were played on this
+ *  strategy — see offensiveEfficiency for why the distinction matters. */
+function formatEfficiency(ratio: number | null): string {
+  return ratio === null ? "—" : `${Math.round(ratio * 100)}%`;
 }
 
 // ── Recorded stats (§ stats) ────────────────────────────────────────────────

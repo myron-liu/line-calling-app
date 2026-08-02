@@ -18,10 +18,14 @@ import { newId } from "@/lib/id";
 export function PointEditModal({
   point,
   roster,
+  strategyVocabulary,
   onClose,
   onSave,
 }: {
   point: Point;
+  /** Tags already in use this game, so re-tagging reuses the same vocabulary
+   *  the live picker offers rather than inventing a parallel one. */
+  strategyVocabulary: string[];
   /** The game's full roster snapshot — includes players no longer active, so
    *  a historical line still resolves every name on it. */
   roster: RosterSnapshotEntry[];
@@ -32,7 +36,9 @@ export function PointEditModal({
   const [result, setResult] = useState(point.result);
   const [scoring, setScoring] = useState<Scoring | undefined>(point.scoring);
   const [events, setEvents] = useState<StatEvent[]>(point.statEvents ?? []);
+  const [strategyTags, setStrategyTags] = useState<string[]>(point.strategyTags ?? []);
   const [swapping, setSwapping] = useState<string | null>(null);
+  const [newTag, setNewTag] = useState("");
 
   const byId = new Map(roster.map((p) => [p.playerId, p]));
   const nameOf = (id: string) => {
@@ -68,6 +74,7 @@ export function PointEditModal({
       // previously-recorded one instead of being read as "leave alone".
       scoring: scoring ?? null,
       statEvents: events,
+      strategyTags,
     });
 
   if (swapping) {
@@ -159,6 +166,45 @@ export function PointEditModal({
               {displayName(p)}
             </button>
           ))}
+        </div>
+      </Section>
+
+      <Section label="Strategy">
+        <div className="flex flex-wrap gap-1.5">
+          {Array.from(new Set([...strategyVocabulary, ...strategyTags])).map((tag) => (
+            <button
+              key={tag}
+              onClick={() =>
+                setStrategyTags((cur) =>
+                  cur.includes(tag) ? cur.filter((t) => t !== tag) : [...cur, tag],
+                )
+              }
+              aria-pressed={strategyTags.includes(tag)}
+              className={`rounded-full border px-2.5 py-1 text-sm ${
+                strategyTags.includes(tag)
+                  ? "border-violet-500 bg-violet-100 font-medium text-violet-800 dark:bg-violet-500/20 dark:text-violet-300"
+                  : "border-line text-muted"
+              }`}
+            >
+              {tag}
+            </button>
+          ))}
+        </div>
+        <div className="flex gap-2">
+          <input
+            value={newTag}
+            onChange={(e) => setNewTag(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key !== "Enter") return;
+              const name = newTag.trim();
+              if (name && !strategyTags.includes(name)) {
+                setStrategyTags((cur) => [...cur, name]);
+              }
+              setNewTag("");
+            }}
+            placeholder="New strategy…"
+            className="flex-1 rounded border border-line-strong px-2 py-1 text-sm"
+          />
         </div>
       </Section>
 

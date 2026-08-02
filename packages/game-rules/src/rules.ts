@@ -153,6 +153,54 @@ export function teamPointOutcomes(points: Point[]): TeamPointOutcomes {
   return out;
 }
 
+/** Strategy tags always offered in the live caller, before the team has
+ *  invented any of its own (§ strategy tags). Not a closed set — anything a
+ *  coach types becomes just as real as these. */
+export const DEFAULT_STRATEGY_TAGS = ["Zone", "Person"] as const;
+
+/** One strategy's record, split the same way the whole game's is — so O% and
+ *  D% for it come straight from offensiveEfficiency/defensiveEfficiency. */
+export interface StrategyOutcomes {
+  tag: string;
+  outcomes: TeamPointOutcomes;
+  /** Completed points carrying this tag, i.e. the sum of `outcomes`. */
+  pointsPlayed: number;
+}
+
+/**
+ * Hold/break record per strategy tag, for questions like "what was our zone D
+ * efficiency". A point tagged with several strategies counts toward each,
+ * which is why this returns a list rather than a partition.
+ *
+ * Ordered by most-played first so the strategies a team actually leans on
+ * lead, with the tag name breaking ties.
+ */
+export function strategyOutcomes(points: Point[]): StrategyOutcomes[] {
+  const byTag = new Map<string, Point[]>();
+  for (const p of points) {
+    if (p.result === undefined) continue;
+    for (const tag of p.strategyTags ?? []) {
+      const bucket = byTag.get(tag);
+      if (bucket) bucket.push(p);
+      else byTag.set(tag, [p]);
+    }
+  }
+  return [...byTag.entries()]
+    .map(([tag, tagged]) => ({
+      tag,
+      outcomes: teamPointOutcomes(tagged),
+      pointsPlayed: tagged.length,
+    }))
+    .sort((a, b) => b.pointsPlayed - a.pointsPlayed || a.tag.localeCompare(b.tag));
+}
+
+/** Every strategy tag in use, for offering them again on the next point. */
+export function usedStrategyTags(points: Point[]): string[] {
+  const seen = new Set<string>();
+  for (const p of points) for (const t of p.strategyTags ?? []) seen.add(t);
+  return [...seen].sort((a, b) => a.localeCompare(b));
+}
+
 /**
  * Offensive efficiency: the share of points started on O that we converted
  * into a hold. Null when we haven't started a point on O yet — a 0% that only

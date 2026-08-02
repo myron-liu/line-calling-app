@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
   currentCapStatus,
+  strategyOutcomes,
+  usedStrategyTags,
+  offensiveEfficiency,
+  defensiveEfficiency,
   invertRatio,
   ratioForPoint,
   ratioCounts,
@@ -553,5 +557,85 @@ describe("currentCapStatus", () => {
       minutesRemaining: 10,
       reached: false,
     });
+  });
+});
+
+describe("strategyOutcomes", () => {
+  const pt = (
+    n: number,
+    od: "O" | "D",
+    result: "us" | "them" | undefined,
+    strategyTags?: string[],
+  ): Point => ({
+    id: `p${n}`,
+    gameId: "g",
+    pointNumber: n,
+    od,
+    lineup: [],
+    result,
+    isFirstAfterHalftime: false,
+    strategyTags,
+  });
+
+  test("splits each tag's record by the side it started on", () => {
+    const points = [
+      pt(1, "D", "us", ["Zone"]), // break
+      pt(2, "D", "them", ["Zone"]), // opponent held
+      pt(3, "D", "us", ["Person"]), // break
+      pt(4, "O", "us", ["Person"]), // hold
+      pt(5, "O", "them", ["Zone"]), // broken
+    ];
+    const byTag = Object.fromEntries(strategyOutcomes(points).map((s) => [s.tag, s]));
+
+    expect(byTag["Zone"]!.outcomes).toEqual({
+      holds: 0,
+      broken: 1,
+      breaks: 1,
+      opponentHolds: 1,
+    });
+    expect(defensiveEfficiency(byTag["Zone"]!.outcomes)).toBe(0.5);
+    expect(offensiveEfficiency(byTag["Zone"]!.outcomes)).toBe(0);
+
+    expect(defensiveEfficiency(byTag["Person"]!.outcomes)).toBe(1);
+    expect(offensiveEfficiency(byTag["Person"]!.outcomes)).toBe(1);
+  });
+
+  test("a point with several tags counts toward each", () => {
+    const result = strategyOutcomes([pt(1, "D", "us", ["Zone", "Junk"])]);
+    expect(result.map((s) => s.tag).sort()).toEqual(["Junk", "Zone"]);
+    expect(result.every((s) => s.outcomes.breaks === 1)).toBe(true);
+  });
+
+  test("ignores untagged and in-progress points", () => {
+    const points = [
+      pt(1, "D", "us"), // untagged
+      pt(2, "D", undefined, ["Zone"]), // still being played
+      pt(3, "D", "us", ["Zone"]),
+    ];
+    const zone = strategyOutcomes(points).find((s) => s.tag === "Zone")!;
+    expect(zone.pointsPlayed).toBe(1);
+  });
+
+  test("orders by most played, then by name", () => {
+    const points = [
+      pt(1, "O", "us", ["Person"]),
+      pt(2, "O", "us", ["Person"]),
+      pt(3, "O", "us", ["Zone"]),
+      pt(4, "O", "us", ["Junk"]),
+    ];
+    expect(strategyOutcomes(points).map((s) => s.tag)).toEqual([
+      "Person",
+      "Junk",
+      "Zone",
+    ]);
+  });
+
+  test("usedStrategyTags collects the vocabulary in use", () => {
+    const points = [
+      pt(1, "O", "us", ["Zone"]),
+      pt(2, "O", undefined, ["Junk"]), // in progress still contributes a tag
+      pt(3, "O", "us", ["Zone", "Person"]),
+    ];
+    expect(usedStrategyTags(points)).toEqual(["Junk", "Person", "Zone"]);
   });
 });

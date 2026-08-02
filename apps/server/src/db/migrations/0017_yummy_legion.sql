@@ -1,0 +1,1 @@
+ALTER TABLE "points" ADD COLUMN "strategy_tags" jsonb;

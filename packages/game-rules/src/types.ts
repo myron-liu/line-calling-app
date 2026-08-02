@@ -289,6 +289,12 @@ export interface Point {
    *  for points played before stat recording existed, or where the coach
    *  simply didn't record any. */
   statEvents?: StatEvent[];
+  /** Coach-assigned strategy labels for this point — "Zone", "Person", or
+   *  anything the team invents (§ strategy tags). Free-form and multiple: a
+   *  point can be both "Zone" and "Junk", and it'll count toward each one's
+   *  efficiency separately. There's no managed vocabulary; a tag exists as
+   *  long as some point carries it, the same way SavedLine.tags works. */
+  strategyTags?: string[];
   /** How we scored, captured alongside `result: "us"`. Never set for a point
    *  the opponent scored, and optional even for ours — the coach can skip the
    *  detail and just bank the point. */

@@ -94,6 +94,7 @@ const pointSchema = z.object({
       }),
     )
     .optional(),
+  strategyTags: z.array(z.string()).optional(),
   scoring: z
     .discriminatedUnion("kind", [
       z.object({

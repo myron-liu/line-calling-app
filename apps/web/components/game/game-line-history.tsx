@@ -1,11 +1,18 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ratioCounts, ratioForPoint, type Point } from "@shared/game-rules";
+import {
+  DEFAULT_STRATEGY_TAGS,
+  ratioCounts,
+  ratioForPoint,
+  usedStrategyTags,
+  type Point,
+} from "@shared/game-rules";
 import type { LiveGame } from "@/lib/game/useLiveGame";
 import { isRosterActive, type RosterSnapshotEntry } from "@/lib/storage/gameLog";
 import { displayName, sortRoster } from "@/lib/player-display";
 import { PointEditModal } from "./point-edit-modal";
+import { StrategySummary } from "./live-caller";
 
 /** The "Line history" tab of the live caller: every line this game has put on
  *  the field, newest first, with the one still out there at the top. Picking
@@ -19,6 +26,10 @@ export function LineHistory({
 }) {
   const { game, roster, points, state, actions } = live;
   const [editing, setEditing] = useState<Point | null>(null);
+  const strategyVocabulary = useMemo(
+    () => Array.from(new Set([...DEFAULT_STRATEGY_TAGS, ...usedStrategyTags(points)])),
+    [points],
+  );
 
   const byId = useMemo(
     () => new Map(roster.map((p) => [p.playerId, p])),
@@ -64,6 +75,8 @@ export function LineHistory({
         {need ? ` · ${need.mmp} MMP / ${need.wmp} WMP` : ""}
       </p>
 
+      <StrategySummary points={points} />
+
       {points.length === 0 ? (
         <p className="text-sm text-muted">No lines yet.</p>
       ) : (
@@ -90,6 +103,7 @@ export function LineHistory({
         <PointEditModal
           point={editing}
           roster={roster}
+          strategyVocabulary={strategyVocabulary}
           onClose={() => setEditing(null)}
           onSave={(edit) => {
             actions.editPoint(editing.id, edit);
@@ -115,11 +129,20 @@ function PointStatLine({
     return p ? displayName(p) : "Unknown";
   };
   const events = point.statEvents ?? [];
+  const strategies = point.strategyTags ?? [];
   const s = point.scoring;
-  if (!s && events.length === 0) return null;
+  if (!s && events.length === 0 && strategies.length === 0) return null;
 
   return (
     <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs">
+      {strategies.map((tag) => (
+        <span
+          key={tag}
+          className="rounded bg-violet-100 px-1.5 py-0.5 font-medium text-violet-800 dark:bg-violet-500/20 dark:text-violet-300"
+        >
+          {tag}
+        </span>
+      ))}
       {s?.kind === "goal" && (
         <span className="rounded bg-emerald-100 px-1.5 py-0.5 font-medium text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-300">
           {s.assistPlayerId ? `${name(s.assistPlayerId)} → ` : ""}

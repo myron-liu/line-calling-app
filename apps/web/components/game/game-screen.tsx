@@ -12,6 +12,8 @@ import type {
   PointEdit,
 } from "@shared/game-rules";
 import {
+  DEFAULT_STRATEGY_TAGS,
+  usedStrategyTags,
   defensiveEfficiency,
   efficiencyFromPlusMinus,
   emptyStatTotals,
@@ -27,6 +29,7 @@ import { displayName } from "@/lib/player-display";
 import type { RosterSnapshotEntry } from "@/lib/storage/gameLog";
 import { LiveCaller } from "./live-caller";
 import { PointEditModal } from "./point-edit-modal";
+import { StrategySummary } from "./live-caller";
 
 // One route, three surfaces (§16). The live caller and recap key off the derived
 // phase from the engine.
@@ -280,6 +283,8 @@ function Recap({ live }: { live: LiveGame }) {
 
       <OverallStats outcomes={outcomes} />
 
+      <StrategySummary points={points} />
+
       <LineHistory points={points} byId={byId} onEditPoint={actions.editPoint} roster={roster} />
 
       <PointsPlayedTables
@@ -430,6 +435,9 @@ function LineHistory({
         <PointEditModal
           point={editing}
           roster={roster}
+          strategyVocabulary={Array.from(
+            new Set([...DEFAULT_STRATEGY_TAGS, ...usedStrategyTags(points)]),
+          )}
           onClose={() => setEditing(null)}
           onSave={(edit) => {
             onEditPoint(editing.id, edit);

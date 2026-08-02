@@ -266,6 +266,7 @@ export const points = pgTable(
     statEvents: jsonb("stat_events").$type<
       { id: string; playerId: string; type: "block" | "turnover" }[]
     >(),
+    strategyTags: jsonb("strategy_tags").$type<string[]>(),
     scoring: jsonb("scoring").$type<
       | { kind: "goal"; assistPlayerId?: string; goalPlayerId: string }
       | { kind: "callahan"; playerId: string }
