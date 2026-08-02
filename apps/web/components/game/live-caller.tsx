@@ -5,6 +5,7 @@ import {
   SITUATION_TAGS,
   currentCapStatus,
   genderStateLabel,
+  nextPointIfResult,
   playerSecondsPlayed,
   ratioCounts,
   ratioForPoint,
@@ -64,7 +65,10 @@ export function LiveCaller({ live }: { live: LiveGame }) {
   // scratch. A fresh point_in_progress phase always starts this empty (its
   // embedded prepare-mode LineBuilder reports its own initial empty selection
   // right on mount), so nothing stale can leak into a later point.
-  const [nextLineDraft, setNextLineDraft] = useState<string[]>([]);
+  // A line prepared for each outcome of the point in progress (see
+  // ContingencyLines), plus the one carried into the point that just opened.
+  const [drafts, setDrafts] = useState<NextLineDrafts>(emptyNextLineDrafts);
+  const [carriedLine, setCarriedLine] = useState<string[] | null>(null);
   const [tab, setTab] = useState<"live" | "history">("live");
   // A lineup picked from the Line history tab. `nonce` changes on every pick —
   // even a repeated identical lineup — so the line builder's effect reliably
@@ -109,7 +113,10 @@ export function LiveCaller({ live }: { live: LiveGame }) {
           <LineBuilder
             live={live}
             key={`p${state.currentPointNumber}`}
-            seed={nextLineDraft.length > 0 ? nextLineDraft : carryOver}
+            // carryOver wins: it's only set right after an undo, and the line
+            // being restored is more current than a contingency prepared
+            // before the point that just got reverted.
+            seed={carryOver ?? (carriedLine?.length ? carriedLine : null)}
             mode="confirm"
             pointNumber={state.currentPointNumber}
             genderRatio={state.genderRatio}
@@ -120,7 +127,11 @@ export function LiveCaller({ live }: { live: LiveGame }) {
         {state.phase === "point_in_progress" && (
           <InProgressControls
             live={live}
-            onNextLineDraftChange={setNextLineDraft}
+            drafts={drafts}
+            onDraftChange={(outcome, ids) =>
+              setDrafts((cur) => ({ ...cur, [outcome]: ids }))
+            }
+            onResultRecorded={(scorer) => setCarriedLine(drafts[scorer])}
             replaySeed={replaySeed}
           />
         )}
@@ -1634,24 +1645,31 @@ function SaveLineButton({
 
 function InProgressControls({
   live,
-  onNextLineDraftChange,
+  drafts,
+  onDraftChange,
+  onResultRecorded,
   replaySeed,
 }: {
   live: LiveGame;
-  onNextLineDraftChange: (ids: string[]) => void;
+  drafts: NextLineDrafts;
+  onDraftChange: (outcome: PointResult, ids: string[]) => void;
+  /** Fired alongside the result so the caller knows which contingency line
+   *  to carry into the next point. */
+  onResultRecorded: (scorer: PointResult) => void;
   replaySeed: { nonce: number; lineup: string[] } | null;
 }) {
-  const { game, roster, state, points, actions } = live;
-  const nextPointNumber = state.currentPointNumber + 1;
-  const nextGenderRatio = game.startingGenderRatio
-    ? ratioForPoint(nextPointNumber, game.startingGenderRatio)
-    : undefined;
+  const { roster, state, points, actions } = live;
   const currentLine = sortRoster(
     roster.filter((p) => state.currentLineup.includes(p.playerId)),
   );
   const currentPoint = points.find((p) => p.result === undefined);
   const pointStartedAt = currentPoint?.startedAt;
   const [scoringOpen, setScoringOpen] = useState(false);
+
+  const record = (scorer: PointResult, scoring?: Scoring) => {
+    onResultRecorded(scorer);
+    actions.recordResult(scorer, scoring);
+  };
 
   return (
     <div className="space-y-4">
@@ -1661,7 +1679,7 @@ function InProgressControls({
         {/* "We scored" opens the goal/Callahan modal, which is what actually
             records the result — "they scored" has no detail to capture. */}
         <ScoreButton label="We scored ▸" onClick={() => setScoringOpen(true)} tone="emerald" />
-        <ScoreButton label="They scored ▸" onClick={() => actions.recordResult("them")} tone="neutral" />
+        <ScoreButton label="They scored ▸" onClick={() => record("them")} tone="neutral" />
       </div>
       {scoringOpen && (
         <ScoringModal
@@ -1669,7 +1687,7 @@ function InProgressControls({
           onClose={() => setScoringOpen(false)}
           onRecord={(scoring) => {
             setScoringOpen(false);
-            actions.recordResult("us", scoring);
+            record("us", scoring);
           }}
         />
       )}
@@ -1685,25 +1703,151 @@ function InProgressControls({
 
       <SubstitutionFlow live={live} />
 
-      <div className="space-y-3 border-t border-line pt-3">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold">
-            Prepare next line <span className="font-normal text-faint">· Point {nextPointNumber}</span>
-          </h2>
-          {nextGenderRatio && <NextRatioBadge ratio={nextGenderRatio} />}
-        </div>
-        <LineBuilder
-          live={live}
-          seed={null}
-          mode="prepare"
-          pointNumber={nextPointNumber}
-          genderRatio={nextGenderRatio}
-          od={undefined}
-          onSelectionChange={onNextLineDraftChange}
-          replaySeed={replaySeed}
-        />
-      </div>
+      <ContingencyLines
+        live={live}
+        drafts={drafts}
+        onDraftChange={onDraftChange}
+        replaySeed={replaySeed}
+      />
     </div>
+  );
+}
+
+// ── Contingency lines (§ prepare next line) ─────────────────────────────────
+
+/** A prepared line for each way the current point can end, keyed by scorer. */
+export type NextLineDrafts = Record<PointResult, string[]>;
+
+export const emptyNextLineDrafts = (): NextLineDrafts => ({ us: [], them: [] });
+
+const OUTCOME_LABEL: Record<PointResult, string> = {
+  us: "If we score",
+  them: "If they score",
+};
+
+/**
+ * Two lines prepared at once, one per outcome — because which side we're on
+ * next depends on who wins the point in progress (we score, we pull, so we're
+ * on D). Each builder therefore gets its own O/D, which is what makes its
+ * quick-lines bar sort the right side's pods first and pick a sensible
+ * situational tag.
+ *
+ * Both stay mounted and are shown/hidden rather than swapped, so switching
+ * between them doesn't discard a half-built line.
+ */
+function ContingencyLines({
+  live,
+  drafts,
+  onDraftChange,
+  replaySeed,
+}: {
+  live: LiveGame;
+  drafts: NextLineDrafts;
+  onDraftChange: (outcome: PointResult, ids: string[]) => void;
+  replaySeed: { nonce: number; lineup: string[] } | null;
+}) {
+  const { game, log } = live;
+  const [tab, setTab] = useState<PointResult>("us");
+
+  // Both previews come from the engine running the real recordResult, so
+  // halftime and the ABBA ratio are handled for us (see nextPointIfResult).
+  const previews = useMemo(
+    () =>
+      log
+        ? {
+            us: nextPointIfResult(game, log, "us"),
+            them: nextPointIfResult(game, log, "them"),
+          }
+        : null,
+    [game, log],
+  );
+  if (!previews) return null;
+
+  const active = previews[tab];
+
+  return (
+    <div className="space-y-3 border-t border-line pt-3">
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold">
+          Prepare next line{" "}
+          <span className="font-normal text-faint">· Point {active.pointNumber}</span>
+        </h2>
+        {active.genderRatio && <NextRatioBadge ratio={active.genderRatio} />}
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        {(["us", "them"] as PointResult[]).map((outcome) => (
+          <OutcomeTab
+            key={outcome}
+            label={OUTCOME_LABEL[outcome]}
+            od={previews[outcome].od}
+            picked={drafts[outcome].length}
+            active={tab === outcome}
+            onClick={() => setTab(outcome)}
+          />
+        ))}
+      </div>
+
+      {active.gameEnds && (
+        <p className="text-xs text-muted">
+          This result reaches the cap — there&rsquo;d be no next point.
+        </p>
+      )}
+
+      {(["us", "them"] as PointResult[]).map((outcome) => (
+        <div key={outcome} className={tab === outcome ? "" : "hidden"}>
+          <LineBuilder
+            live={live}
+            seed={null}
+            mode="prepare"
+            pointNumber={previews[outcome].pointNumber}
+            genderRatio={previews[outcome].genderRatio}
+            od={previews[outcome].od}
+            onSelectionChange={(ids) => onDraftChange(outcome, ids)}
+            // Only the visible builder should swallow a replayed line.
+            replaySeed={tab === outcome ? replaySeed : null}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function OutcomeTab({
+  label,
+  od,
+  picked,
+  active,
+  onClick,
+}: {
+  label: string;
+  od: OD;
+  picked: number;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      aria-pressed={active}
+      className={`rounded-lg border px-2 py-1.5 text-left text-sm ${
+        active
+          ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-500/10"
+          : "border-line text-muted"
+      }`}
+    >
+      <span className="flex items-center gap-1.5 font-medium">
+        {label}
+        <span
+          className={`rounded px-1 text-[10px] font-semibold text-white ${
+            od === "O" ? "bg-red-600" : "bg-blue-600"
+          }`}
+        >
+          {od}
+        </span>
+      </span>
+      <span className="text-xs text-faint">{picked}/7 picked</span>
+    </button>
   );
 }
 

@@ -10,6 +10,7 @@ import {
   endGame,
   editPointLineup,
   editPoint,
+  nextPointIfResult,
   undoLastPoint,
   redoAction,
   addStatEvent,
@@ -591,5 +592,54 @@ describe("rotation subs", () => {
     const live = deriveLiveGameState(game, s.points, s.meta);
     expect(live.pointsPlayed["a"]).toBe(1); // started, so it counts
     expect(live.pointsPlayed["x"]).toBeUndefined(); // came on, doesn't
+  });
+});
+
+describe("nextPointIfResult", () => {
+  const lineup = ["a", "b", "c", "d", "e", "f", "g"];
+
+  test("scoring puts us on D next, conceding puts us on O", () => {
+    const s = confirmLine(game, fresh(), lineup, "pt-1");
+    expect(nextPointIfResult(game, s, "us").od).toBe("D");
+    expect(nextPointIfResult(game, s, "them").od).toBe("O");
+  });
+
+  test("both outcomes share the next point's ordinal and ABBA ratio", () => {
+    const s = confirmLine(game, fresh(), lineup, "pt-1");
+    const us = nextPointIfResult(game, s, "us");
+    const them = nextPointIfResult(game, s, "them");
+    expect(us.pointNumber).toBe(2);
+    expect(them.pointNumber).toBe(2);
+    expect(us.genderRatio).toBe(them.genderRatio!);
+  });
+
+  test("a result that crosses halftime forces the same side either way", () => {
+    // 6-6, so either team's next point reaches the half score of 7.
+    let s = fresh();
+    for (let i = 0; i < 6; i++) s = playPoint(s, "us", lineup);
+    for (let i = 0; i < 6; i++) s = playPoint(s, "them", lineup);
+    s = confirmLine(game, s, lineup, "pt-13");
+    const us = nextPointIfResult(game, s, "us");
+    const them = nextPointIfResult(game, s, "them");
+    expect(us.isFirstAfterHalftime).toBe(true);
+    expect(them.isFirstAfterHalftime).toBe(true);
+    // First after half is the inverse of the game's starting side, for both.
+    expect(us.od).toBe("D");
+    expect(them.od).toBe("D");
+  });
+
+  test("flags the outcome that ends the game", () => {
+    let s = fresh();
+    for (let i = 0; i < 12; i++) s = playPoint(s, "us", lineup);
+    s = confirmLine(game, s, lineup, "pt-13");
+    expect(nextPointIfResult(game, s, "us").gameEnds).toBe(true); // 13th, hits cap
+    expect(nextPointIfResult(game, s, "them").gameEnds).toBe(false);
+  });
+
+  test("doesn't mutate the state it looks ahead from", () => {
+    const s = confirmLine(game, fresh(), lineup, "pt-1");
+    nextPointIfResult(game, s, "us");
+    expect(s.points[0]!.result).toBeUndefined();
+    expect(deriveLiveGameState(game, s.points, s.meta).phase).toBe("point_in_progress");
   });
 });

@@ -240,6 +240,38 @@ export function recordResult(
   return { points, meta };
 }
 
+/** What the point after this one would look like under a given result. */
+export interface NextPointPreview {
+  pointNumber: number;
+  od: OD;
+  genderRatio?: GenderRatio;
+  isFirstAfterHalftime: boolean;
+  /** True when this result would end the game, so there's no next line to
+   *  prepare (the cap is reached). */
+  gameEnds: boolean;
+}
+
+/**
+ * Look ahead to the next point under a hypothetical result, so the live caller
+ * can prepare a line for each outcome while the current point is still being
+ * played (§ contingency lines).
+ *
+ * Deliberately implemented by *running* recordResult against a copy of the log
+ * rather than re-deriving anything: which side we're on next, the ABBA ratio,
+ * and whether the result crosses halftime are all already encoded there, and a
+ * second implementation of those rules would drift from the real one.
+ */
+export function nextPointIfResult(
+  game: GameRules,
+  state: GameLogState,
+  scorer: PointResult,
+): NextPointPreview {
+  const after = recordResult(game, state, scorer);
+  const ctx = upcomingContext(game, after.points, after.meta);
+  const phase = deriveLiveGameState(game, after.points, after.meta).phase;
+  return { ...ctx, gameEnds: phase === "completed" };
+}
+
 /** Manual halftime (time cap). Idempotent: a second call is a no-op so timeouts
  *  don't double-reset (§6, §12). */
 export function callHalftime(game: GameRules, state: GameLogState): GameLogState {

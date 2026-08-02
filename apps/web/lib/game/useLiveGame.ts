@@ -149,6 +149,9 @@ export interface LiveGame {
   state: LiveGameState;
   /** The raw point log, for line history (§ recap). */
   points: Point[];
+  /** Points + meta together, for engine calls that need the whole log — e.g.
+   *  looking ahead to the next point under each result (nextPointIfResult). */
+  log: GameLogState;
   savedLines: SavedLine[];
   /** Line pre-selected after an undo, so the coach can re-call it. */
   carryOver: string[] | null;
@@ -709,6 +712,7 @@ export function useLiveGame(gameId: string): LiveGameResult {
       roster,
       state,
       points: log.points,
+      log,
       savedLines,
       carryOver,
       canUndo,
