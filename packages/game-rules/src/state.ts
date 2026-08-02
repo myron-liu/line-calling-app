@@ -430,6 +430,8 @@ export interface PointEdit {
   scoring?: Scoring | null;
   statEvents?: StatEvent[];
   strategyTags?: string[];
+  /** Empty string clears the note; undefined leaves it alone. */
+  notes?: string;
 }
 
 /**
@@ -482,6 +484,7 @@ export function editPoint(
           : (edit.scoring ?? point.scoring),
     statEvents: edit.statEvents ? [...edit.statEvents] : point.statEvents,
     strategyTags: edit.strategyTags ? [...edit.strategyTags] : point.strategyTags,
+    notes: edit.notes !== undefined ? edit.notes || undefined : point.notes,
   };
 
   const points = state.points.map((p, i) => (i === idx ? updated : p));

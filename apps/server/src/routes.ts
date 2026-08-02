@@ -95,6 +95,7 @@ const pointSchema = z.object({
     )
     .optional(),
   strategyTags: z.array(z.string()).optional(),
+  notes: z.string().max(1000).optional(),
   scoring: z
     .discriminatedUnion("kind", [
       z.object({

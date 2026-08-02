@@ -39,6 +39,7 @@ export function PointEditModal({
   const [strategyTags, setStrategyTags] = useState<string[]>(point.strategyTags ?? []);
   const [swapping, setSwapping] = useState<string | null>(null);
   const [newTag, setNewTag] = useState("");
+  const [notes, setNotes] = useState(point.notes ?? "");
 
   const byId = new Map(roster.map((p) => [p.playerId, p]));
   const nameOf = (id: string) => {
@@ -86,6 +87,7 @@ export function PointEditModal({
       scoring: scoring ?? null,
       statEvents: events,
       strategyTags,
+      notes,
     });
 
   if (swapping) {
@@ -230,6 +232,17 @@ export function PointEditModal({
           players={creditable}
           nameOf={nameOf}
           onChange={setEvents}
+        />
+      </Section>
+
+      <Section label="Notes">
+        <textarea
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          rows={2}
+          maxLength={1000}
+          placeholder="What they showed, what broke down…"
+          className="w-full rounded border border-line-strong px-2 py-1.5 text-sm"
         />
       </Section>
 

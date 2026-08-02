@@ -420,6 +420,7 @@ function LineHistory({
               {p.lineup.map((id) => nameFor(id)).join(", ")}
             </p>
             <PointStatLine point={p} nameFor={nameFor} />
+            {p.notes && <p className="mt-1 italic text-muted">{p.notes}</p>}
             {p.substitutions && p.substitutions.length > 0 && (
               <ul className="mt-1 space-y-0.5">
                 {p.substitutions.map((s, si) => (

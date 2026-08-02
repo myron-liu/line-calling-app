@@ -279,6 +279,9 @@ function HistoryRow({
       </div>
       <p className="mt-1 text-sm">{players.map((p) => displayName(p)).join(" · ")}</p>
       <PointStatLine point={point} byId={byId} />
+      {point.notes && (
+        <p className="mt-1 text-xs italic text-muted">{point.notes}</p>
+      )}
       {!viable && (
         <p className="mt-1 text-xs text-faint">
           {!allAvailable

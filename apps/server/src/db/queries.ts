@@ -1355,6 +1355,7 @@ export async function syncGame(
         endedAt: p.endedAt ? new Date(p.endedAt) : undefined,
         statEvents: p.statEvents,
         strategyTags: p.strategyTags,
+        notes: p.notes,
         scoring: p.scoring,
       })),
     );
@@ -1468,6 +1469,7 @@ function toPoint(row: typeof points.$inferSelect): Point {
     endedAt: row.endedAt?.toISOString(),
     statEvents: row.statEvents ?? undefined,
     strategyTags: row.strategyTags ?? undefined,
+    notes: row.notes ?? undefined,
     scoring: row.scoring ?? undefined,
   };
 }

@@ -298,6 +298,9 @@ export interface Point {
    *  efficiency separately. There's no managed vocabulary; a tag exists as
    *  long as some point carries it, the same way SavedLine.tags works. */
   strategyTags?: string[];
+  /** Free text about this point — what the opponent showed, what broke down.
+   *  Written live or added afterward from the line history. */
+  notes?: string;
   /** How we scored, captured alongside `result: "us"`. Never set for a point
    *  the opponent scored, and optional even for ours — the coach can skip the
    *  detail and just bank the point. */

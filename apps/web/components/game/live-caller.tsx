@@ -1776,6 +1776,14 @@ function InProgressControls({
         }
       />
 
+      <PointNotes
+        key={currentPoint?.id}
+        notes={currentPoint?.notes ?? ""}
+        onCommit={(notes) =>
+          currentPoint && actions.editPoint(currentPoint.id, { notes })
+        }
+      />
+
       <StatRecorder
         players={currentLine}
         events={currentPoint?.statEvents ?? []}
@@ -2032,6 +2040,41 @@ function StrategyPicker({
   );
 }
 
+/**
+ * Free text about the point being played — what the opponent showed, what
+ * broke down. Committed on blur rather than per keystroke: every edit is a log
+ * mutation that queues a sync, and a coach typing a sentence shouldn't produce
+ * thirty of them.
+ *
+ * Keyed by point id at the call site, so a new point starts with an empty box
+ * rather than inheriting the last one's text.
+ */
+function PointNotes({
+  notes,
+  onCommit,
+}: {
+  notes: string;
+  onCommit: (notes: string) => void;
+}) {
+  const [draft, setDraft] = useState(notes);
+  return (
+    <label className="flex flex-col gap-1 rounded-lg border border-line p-2">
+      <span className="text-xs font-medium uppercase tracking-wide text-faint">
+        Notes
+      </span>
+      <textarea
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => draft !== notes && onCommit(draft)}
+        rows={2}
+        maxLength={1000}
+        placeholder="What they showed, what broke down…"
+        className="rounded border border-line-strong px-2 py-1.5 text-sm"
+      />
+    </label>
+  );
+}
+
 /** Hold/break efficiency per strategy, for the line-history tab and the
  *  recap. Renders nothing until at least one point has been tagged. */
 export function StrategySummary({ points }: { points: Point[] }) {
@@ -2049,20 +2092,20 @@ export function StrategySummary({ points }: { points: Point[] }) {
               <th className="border-b border-line pb-1 text-left font-semibold">
                 Strategy
               </th>
-              <th className="border-b border-line pb-1 text-right font-semibold" title="Points played on this strategy">
+              <th className="border-b border-line pb-1 text-right font-semibold" title="Points played running this strategy">
                 Pts
               </th>
-              <th className="border-b border-line pb-1 text-right font-semibold" title="Offensive efficiency — share of its O points held">
+              <th className="border-b border-line pb-1 text-right font-semibold" title="Points started on offence running this strategy">
+                O Pts
+              </th>
+              <th className="border-b border-line pb-1 text-right font-semibold" title="Offensive efficiency — share of those O points held">
                 O%
               </th>
-              <th className="border-b border-line pb-1 text-right font-semibold" title="Defensive efficiency — share of its D points broken">
+              <th className="border-b border-line pb-1 text-right font-semibold" title="Points started on defence running this strategy">
+                D Pts
+              </th>
+              <th className="border-b border-line pb-1 text-right font-semibold" title="Defensive efficiency — share of those D points broken">
                 D%
-              </th>
-              <th className="border-b border-line pb-1 text-right font-semibold" title="Holds / O points on this strategy">
-                Holds
-              </th>
-              <th className="border-b border-line pb-1 text-right font-semibold" title="Breaks / D points on this strategy">
-                Breaks
               </th>
             </tr>
           </thead>
@@ -2073,20 +2116,26 @@ export function StrategySummary({ points }: { points: Point[] }) {
               return (
                 <tr key={tag}>
                   <td className="border-b border-line py-1 font-medium">{tag}</td>
-                  <td className="border-b border-line py-1 text-right tabular-nums text-muted">
+                  <td className="border-b border-line py-1 text-right font-medium tabular-nums">
                     {pointsPlayed}
                   </td>
-                  <td className="border-b border-line py-1 text-right tabular-nums">
+                  <td className="border-b border-line py-1 text-right tabular-nums text-muted">
+                    {oPts}
+                  </td>
+                  <td
+                    className="border-b border-line py-1 text-right tabular-nums"
+                    title={`${outcomes.holds} held of ${oPts}`}
+                  >
                     {formatEfficiency(offensiveEfficiency(outcomes))}
                   </td>
-                  <td className="border-b border-line py-1 text-right tabular-nums">
+                  <td className="border-b border-line py-1 text-right tabular-nums text-muted">
+                    {dPts}
+                  </td>
+                  <td
+                    className="border-b border-line py-1 text-right tabular-nums"
+                    title={`${outcomes.breaks} broken of ${dPts}`}
+                  >
                     {formatEfficiency(defensiveEfficiency(outcomes))}
-                  </td>
-                  <td className="border-b border-line py-1 text-right tabular-nums text-muted">
-                    {outcomes.holds}/{oPts}
-                  </td>
-                  <td className="border-b border-line py-1 text-right tabular-nums text-muted">
-                    {outcomes.breaks}/{dPts}
                   </td>
                 </tr>
               );
