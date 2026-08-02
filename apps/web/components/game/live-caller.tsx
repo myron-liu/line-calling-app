@@ -6,6 +6,7 @@ import {
   currentCapStatus,
   genderStateLabel,
   nextPointIfResult,
+  playersOnField,
   playerSecondsPlayed,
   ratioCounts,
   ratioForPoint,
@@ -69,6 +70,14 @@ export function LiveCaller({ live }: { live: LiveGame }) {
   // ContingencyLines), plus the one carried into the point that just opened.
   const [drafts, setDrafts] = useState<NextLineDrafts>(emptyNextLineDrafts);
   const [carriedLine, setCarriedLine] = useState<string[] | null>(null);
+
+  // Whoever finished the last completed point — what "same line" means on the
+  // awaiting_line screen, where the point in progress no longer exists.
+  const lastLineup = useMemo(() => {
+    const done = points.filter((p) => p.result !== undefined);
+    const last = done[done.length - 1];
+    return last ? playersOnField(last) : undefined;
+  }, [points]);
   const [tab, setTab] = useState<"live" | "history">("live");
   // A lineup picked from the Line history tab. `nonce` changes on every pick —
   // even a repeated identical lineup — so the line builder's effect reliably
@@ -121,6 +130,7 @@ export function LiveCaller({ live }: { live: LiveGame }) {
             pointNumber={state.currentPointNumber}
             genderRatio={state.genderRatio}
             od={state.od}
+            sameLine={lastLineup}
             replaySeed={replaySeed}
           />
         )}
@@ -633,20 +643,31 @@ function LineBuilder({
   // full seven, everyone still eligible (nobody hurt or off the roster), and
   // in Mixed the right ratio for the point being prepared — which flips
   // every other point, so the line that just played often can't repeat.
-  const sameLineViable = useMemo(() => {
-    if (!sameLine || sameLine.length !== 7) return false;
-    if (!sameLine.every((id) => eligibleIds.has(id))) return false;
-    if (!need) return true;
+  const sameLineBlockedBy = useMemo((): string | null => {
+    if (!sameLine || sameLine.length !== 7) return "hide";
+    const unavailable = sameLine.filter((id) => !eligibleIds.has(id));
+    if (unavailable.length > 0) {
+      const names = unavailable
+        .map((id) => allById.get(id))
+        .filter((p): p is RosterSnapshotEntry => !!p)
+        .map(displayName);
+      return names.length > 0
+        ? `${names.join(" and ")} ${names.length > 1 ? "aren't" : "isn't"} available`
+        : "someone on it isn't available";
+    }
+    if (!need) return null;
     let mmp = 0;
     let wmp = 0;
     for (const id of sameLine) {
-      const g = byId.get(id)?.genderMatch;
+      const g = allById.get(id)?.genderMatch;
       if (g === "MMP") mmp++;
       else if (g === "WMP") wmp++;
     }
-    return mmp === need.mmp && wmp === need.wmp;
-  }, [sameLine, eligibleIds, byId, need]);
+    if (mmp === need.mmp && wmp === need.wmp) return null;
+    return `this point needs ${need.mmp}M/${need.wmp}W, that line is ${mmp}M/${wmp}W`;
+  }, [sameLine, eligibleIds, allById, need]);
 
+  const sameLineViable = !!sameLine && sameLineBlockedBy === null;
   const sameLineApplied =
     sameLineViable &&
     selected.length === sameLine!.length &&
@@ -836,6 +857,28 @@ function LineBuilder({
 
   return (
     <div className="space-y-3">
+      {sameLine && sameLineBlockedBy !== "hide" && (
+        <div>
+          {sameLineViable ? (
+            <button
+              onClick={() => setSelected([...sameLine])}
+              aria-pressed={sameLineApplied}
+              className={`w-full rounded-lg border py-2 text-sm font-medium ${
+                sameLineApplied
+                  ? "border-emerald-500 bg-emerald-50 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300"
+                  : "border-line-strong hover:bg-surface-2"
+              }`}
+            >
+              {sameLineApplied ? "✓ Same line" : "↻ Same line"}
+            </button>
+          ) : (
+            <p className="text-xs text-faint">
+              Same line unavailable — {sameLineBlockedBy}.
+            </p>
+          )}
+        </div>
+      )}
+
       <SavedLinesBar
         lines={visibleQuickLines}
         appliedIds={appliedLineIds}
@@ -865,29 +908,14 @@ function LineBuilder({
             </span>
           )}
         </span>
-        <span className="flex items-center gap-3">
-          {sameLineViable && (
-            <button
-              onClick={() => setSelected([...sameLine!])}
-              aria-pressed={sameLineApplied}
-              className={`rounded-md border px-2 py-0.5 text-xs font-medium ${
-                sameLineApplied
-                  ? "border-emerald-500 bg-emerald-50 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300"
-                  : "border-line-strong text-muted hover:text-fg"
-              }`}
-            >
-              {sameLineApplied ? "✓ Same line" : "Same line"}
-            </button>
-          )}
-          {selected.length > 0 && (
-            <button
-              onClick={() => setSelected([])}
-              className="text-xs font-medium text-muted hover:text-fg"
-            >
-              Deselect all
-            </button>
-          )}
-        </span>
+        {selected.length > 0 && (
+          <button
+            onClick={() => setSelected([])}
+            className="text-xs font-medium text-muted hover:text-fg"
+          >
+            Deselect all
+          </button>
+        )}
       </div>
       <div className="flex items-center gap-1.5 text-xs">
         <span className={`rounded px-1 font-semibold ${ROLE_BADGE_COLOR.handler}`}>

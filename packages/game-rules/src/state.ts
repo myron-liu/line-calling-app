@@ -48,8 +48,11 @@ function isMixed(game: GameRules): boolean {
   return game.startingGenderRatio !== undefined;
 }
 
-/** The 7 players actually on the field: the starting lineup with injury subs applied. */
-function effectiveOnField(point: Point): string[] {
+/** The 7 players actually on the field for a point: its starting lineup with
+ *  any substitutions applied, in order. Exported because the UI needs the
+ *  same answer for a *finished* point too — "run the same line back" means
+ *  whoever ended the point, not whoever started it. */
+export function playersOnField(point: Point): string[] {
   const onField = [...point.lineup];
   for (const sub of point.substitutions ?? []) {
     const idx = onField.indexOf(sub.injuredPlayerId);
@@ -144,7 +147,7 @@ export function deriveLiveGameState(
     currentPointNumber = inProgress.pointNumber;
     od = inProgress.od;
     genderRatio = inProgress.genderRatio;
-    currentLineup = effectiveOnField(inProgress);
+    currentLineup = playersOnField(inProgress);
   } else {
     const ctx = upcomingContext(game, points, meta);
     phase = "awaiting_line";
@@ -328,7 +331,7 @@ export function substitute(
   // Checked against who's actually on the field, not the starting 7: a player
   // subbed in earlier this point can come off themselves (and used to be
   // rejected as "not on this line"), and one already subbed off can come back.
-  const onField = effectiveOnField(point);
+  const onField = playersOnField(point);
   if (!onField.includes(outgoingPlayerId)) {
     throw new Error("That player is not on this line");
   }
@@ -364,7 +367,7 @@ export function addStatEvent(
   const idx = state.points.findIndex((p) => p.result === undefined);
   if (idx === -1) throw new Error("No point in progress");
   const point = state.points[idx]!;
-  if (!effectiveOnField(point).includes(event.playerId)) {
+  if (!playersOnField(point).includes(event.playerId)) {
     throw new Error("Player is not on the field for this point");
   }
   const updated: Point = {
