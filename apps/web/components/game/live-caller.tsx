@@ -410,10 +410,10 @@ function LineBuilder({
   pointNumber: number;
   /** Undefined for a non-mixed team either way. */
   genderRatio: GenderRatio | undefined;
-  /** Undefined in "prepare" mode: which side you'll be on next depends on
-   *  who wins the point still in progress, so it genuinely isn't known yet
-   *  (see odForPoint in rules.ts) — only the gender ratio can be. */
-  od: OD | undefined;
+  /** The side this line will be on. Known in "prepare" mode too: each
+   *  contingency builder is scoped to one outcome of the point in progress,
+   *  and that outcome determines the side (see nextPointIfResult). */
+  od: OD;
   onSelectionChange?: (ids: string[]) => void;
   /** A lineup queued from the line-history viewer's separate tab (see
    *  game-line-history.tsx) — applied to the current selection whenever its
@@ -527,16 +527,12 @@ function LineBuilder({
   );
   const [applyNote, setApplyNote] = useState<string | null>(null);
   const [sortMode, setSortMode] = useState<SortMode>("roster");
-  // Which O/D accordion(s) are open — starts on whichever matches this point's
-  // side, but applying a saved line/pod can force one or both open too (see
-  // applyLine below). Genuinely controlled (not just an initial value) so we
-  // can open it programmatically after the initial render. In "prepare" mode
-  // od is undefined (not known yet), so both start open — there's no "wrong"
-  // side to default-collapse when either is still possible.
-  const [openSections, setOpenSections] = useState({
-    O: od !== "D",
-    D: od !== "O",
-  });
+  // Which O/D accordion(s) are open. Both, always, on first render: a line is
+  // routinely built from players on either side, and defaulting the "wrong"
+  // one shut cost a tap every point to reach someone who was right there.
+  // Still controlled rather than a plain <details open>, so applying a saved
+  // line/pod can re-open a section the coach collapsed (see applyLine).
+  const [openSections, setOpenSections] = useState({ O: true, D: true });
 
   // "prepare" mode has no confirm step of its own — report the selection
   // upward so it can seed the real LineBuilder once this point actually opens.
@@ -663,11 +659,8 @@ function LineBuilder({
   };
   // Lines/pods tagged for this point's side sort first (untagged/"both" in the
   // middle, the opposite side last), so the relevant quick-fills are right
-  // there without scanning past ones for the other side. In "prepare" mode
-  // there's no known side yet, so side-tagged pods rank equally — only
-  // untagged/"both" ones (equally useful either way) get a boost.
+  // there without scanning past ones for the other side.
   const sideMatchRank = (lineSide: SavedLine["side"]): number => {
-    if (!od) return !lineSide || lineSide === "both" ? 0 : 1;
     if (lineSide === od) return 0;
     if (!lineSide || lineSide === "both") return 1;
     return 2;
