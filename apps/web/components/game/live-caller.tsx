@@ -393,6 +393,7 @@ function LineBuilder({
   genderRatio,
   od,
   onSelectionChange,
+  sameLine,
   replaySeed,
 }: {
   live: LiveGame;
@@ -415,6 +416,10 @@ function LineBuilder({
    *  and that outcome determines the side (see nextPointIfResult). */
   od: OD;
   onSelectionChange?: (ids: string[]) => void;
+  /** The seven currently on the field, offered as a one-tap "Same line" in
+   *  the contingency builders — only when they'd actually be a legal line
+   *  for the point being prepared. */
+  sameLine?: string[];
   /** A lineup queued from the line-history viewer's separate tab (see
    *  game-line-history.tsx) — applied to the current selection whenever its
    *  nonce changes, same as an initial seed but arriving mid-lifecycle. */
@@ -623,6 +628,29 @@ function LineBuilder({
     players: selectedPlayers,
     eligiblePlayerIds: eligibleIds,
   });
+
+  // "Same line" is only offered when running it back is actually legal: a
+  // full seven, everyone still eligible (nobody hurt or off the roster), and
+  // in Mixed the right ratio for the point being prepared — which flips
+  // every other point, so the line that just played often can't repeat.
+  const sameLineViable = useMemo(() => {
+    if (!sameLine || sameLine.length !== 7) return false;
+    if (!sameLine.every((id) => eligibleIds.has(id))) return false;
+    if (!need) return true;
+    let mmp = 0;
+    let wmp = 0;
+    for (const id of sameLine) {
+      const g = byId.get(id)?.genderMatch;
+      if (g === "MMP") mmp++;
+      else if (g === "WMP") wmp++;
+    }
+    return mmp === need.mmp && wmp === need.wmp;
+  }, [sameLine, eligibleIds, byId, need]);
+
+  const sameLineApplied =
+    sameLineViable &&
+    selected.length === sameLine!.length &&
+    sameLine!.every((id) => selected.includes(id));
 
   const totalReached = selected.length >= 7;
   const mmpFull = totalReached || result.mmp >= maxMMP;
@@ -837,14 +865,29 @@ function LineBuilder({
             </span>
           )}
         </span>
-        {selected.length > 0 && (
-          <button
-            onClick={() => setSelected([])}
-            className="text-xs font-medium text-muted hover:text-fg"
-          >
-            Deselect all
-          </button>
-        )}
+        <span className="flex items-center gap-3">
+          {sameLineViable && (
+            <button
+              onClick={() => setSelected([...sameLine!])}
+              aria-pressed={sameLineApplied}
+              className={`rounded-md border px-2 py-0.5 text-xs font-medium ${
+                sameLineApplied
+                  ? "border-emerald-500 bg-emerald-50 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300"
+                  : "border-line-strong text-muted hover:text-fg"
+              }`}
+            >
+              {sameLineApplied ? "✓ Same line" : "Same line"}
+            </button>
+          )}
+          {selected.length > 0 && (
+            <button
+              onClick={() => setSelected([])}
+              className="text-xs font-medium text-muted hover:text-fg"
+            >
+              Deselect all
+            </button>
+          )}
+        </span>
       </div>
       <div className="flex items-center gap-1.5 text-xs">
         <span className={`rounded px-1 font-semibold ${ROLE_BADGE_COLOR.handler}`}>
@@ -1797,6 +1840,7 @@ function ContingencyLines({
             genderRatio={previews[outcome].genderRatio}
             od={previews[outcome].od}
             onSelectionChange={(ids) => onDraftChange(outcome, ids)}
+            sameLine={live.state.currentLineup}
             // Only the visible builder should swallow a replayed line.
             replaySeed={tab === outcome ? replaySeed : null}
           />
