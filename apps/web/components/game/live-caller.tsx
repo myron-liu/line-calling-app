@@ -1683,7 +1683,7 @@ function InProgressControls({
         onRemove={actions.removeStatEvent}
       />
 
-      <InjuryFlow live={live} />
+      <SubstitutionFlow live={live} />
 
       <div className="space-y-3 border-t border-line pt-3">
         <div className="flex items-center justify-between">
@@ -2021,41 +2021,59 @@ function ScoreButton({
   );
 }
 
-function InjuryFlow({ live }: { live: LiveGame }) {
+/**
+ * Mid-point substitutions (§8) — for an injury or just a rotation.
+ *
+ * The two are deliberately separate: marking someone injured locks them out of
+ * every later line this game, so doing it on every sub used to drain the bench
+ * a couple of rotations in and leave the coach with "no eligible bench
+ * players". Injury is now an explicit opt-in on the second step.
+ */
+function SubstitutionFlow({ live }: { live: LiveGame }) {
   const { roster, state, actions } = live;
-  const [injuredId, setInjuredId] = useState<string | null>(null);
+  const [outgoingId, setOutgoingId] = useState<string | null>(null);
+  const [markInjured, setMarkInjured] = useState(false);
 
   const byId = new Map(roster.map((p) => [p.playerId, p]));
   const onField = new Set(state.currentLineup);
-  // You can only injure someone currently on the field.
+  // You can only sub off someone currently on the field.
   const onFieldPlayers = state.currentLineup
     .map((id) => byId.get(id))
     .filter((p): p is RosterSnapshotEntry => p !== undefined);
-  const injuredPlayer = injuredId ? byId.get(injuredId) : undefined;
-  // Replacements: eligible players NOT already on the field, and matching the
-  // injured player's gender match — a sub can't change the line's ratio.
+  const outgoingPlayer = outgoingId ? byId.get(outgoingId) : undefined;
+  // Anyone eligible and not already on the field, matching the outgoing
+  // player's gender match — a sub can't change the line's ratio. Someone
+  // subbed off earlier this point qualifies again, so a coach can rotate a
+  // player out and straight back on.
   const replacements = sortRoster(
     roster.filter(
       (p) =>
         !p.injured &&
         isRosterActive(p) &&
         !onField.has(p.playerId) &&
-        (!injuredPlayer || p.genderMatch === injuredPlayer.genderMatch),
+        (!outgoingPlayer || p.genderMatch === outgoingPlayer.genderMatch),
     ),
   );
 
-  if (!injuredId) {
+  const reset = () => {
+    setOutgoingId(null);
+    setMarkInjured(false);
+  };
+
+  if (!outgoingId) {
     return (
       <details className="rounded-lg border border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 p-3 text-sm">
         <summary className="cursor-pointer font-medium text-amber-800 dark:text-amber-200">
-          Injury — force a hot-sub
+          Substitution — swap someone off
         </summary>
-        <p className="mt-2 mb-1 text-amber-700 dark:text-amber-300">Who’s hurt?</p>
+        <p className="mt-2 mb-1 text-amber-700 dark:text-amber-300">
+          Who’s coming off?
+        </p>
         <div className="flex flex-wrap gap-1.5">
           {onFieldPlayers.map((p) => (
             <button
               key={p.playerId}
-              onClick={() => setInjuredId(p.playerId)}
+              onClick={() => setOutgoingId(p.playerId)}
               className="rounded border border-amber-300 dark:border-amber-500/40 bg-surface px-2 py-1"
             >
               {displayName(p)}
@@ -2067,20 +2085,22 @@ function InjuryFlow({ live }: { live: LiveGame }) {
   }
 
   return (
-    <div className="rounded-lg border border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-500/10 p-3 text-sm">
-      <p className="mb-1 font-medium text-amber-800 dark:text-amber-200">
-        Replace {injuredPlayer ? displayName(injuredPlayer) : ""} with:
+    <div className="space-y-2 rounded-lg border border-amber-300 dark:border-amber-500/40 bg-amber-50 dark:bg-amber-500/10 p-3 text-sm">
+      <p className="font-medium text-amber-800 dark:text-amber-200">
+        Replace {outgoingPlayer ? displayName(outgoingPlayer) : ""} with:
       </p>
       <div className="flex flex-wrap gap-1.5">
         {replacements.length === 0 ? (
-          <span className="text-amber-700 dark:text-amber-300">No eligible bench players.</span>
+          <span className="text-amber-700 dark:text-amber-300">
+            No eligible bench players.
+          </span>
         ) : (
           replacements.map((p) => (
             <button
               key={p.playerId}
               onClick={() => {
-                actions.injurySub(injuredId, p.playerId);
-                setInjuredId(null);
+                actions.substitute(outgoingId, p.playerId, markInjured);
+                reset();
               }}
               className="rounded border border-emerald-300 dark:border-emerald-500/40 bg-surface px-2 py-1"
             >
@@ -2089,6 +2109,23 @@ function InjuryFlow({ live }: { live: LiveGame }) {
           ))
         )}
       </div>
+      <label className="flex items-center gap-2 text-amber-800 dark:text-amber-200">
+        <input
+          type="checkbox"
+          checked={markInjured}
+          onChange={(e) => setMarkInjured(e.target.checked)}
+        />
+        <span>
+          Injured — lock {outgoingPlayer ? displayName(outgoingPlayer) : "them"} out
+          of later lines
+        </span>
+      </label>
+      <button
+        onClick={reset}
+        className="rounded-md border border-line-strong px-3 py-1 text-sm"
+      >
+        Cancel
+      </button>
     </div>
   );
 }

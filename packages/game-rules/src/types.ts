@@ -226,6 +226,10 @@ export interface Game {
   currentPointNumber?: number;
 }
 
+/** One mid-point swap. Subs aren't only for injuries any more, but the field
+ *  name is the persisted shape (points.substitutions jsonb) — renaming it
+ *  would mean migrating every existing row for no behavioural gain, so read
+ *  it as "the player who came off". */
 export interface Substitution {
   injuredPlayerId: string;
   replacementPlayerId: string;

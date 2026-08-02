@@ -273,29 +273,32 @@ export function callTimeout(
 }
 
 /**
- * Forced injury hot-sub on the in-progress point (§8). Records the swap; the
- * injured starter still counts the point, the replacement does not. Roster
- * eligibility of the replacement is the caller's responsibility (needs roster);
- * here we only enforce on-field constraints.
+ * Swap a player off the field mid-point (§8) — for an injury or just a
+ * rotation. Records the swap; the starter still counts the point, the
+ * replacement does not. Roster eligibility of the replacement is the caller's
+ * responsibility (needs roster); here we only enforce on-field constraints.
+ *
+ * Says nothing about whether anyone is hurt. Locking a player out of later
+ * lines is a separate, explicit choice (the roster snapshot's `injured`
+ * flag), so a routine sub doesn't quietly shrink the bench.
  */
-export function injurySub(
+export function substitute(
   state: GameLogState,
-  injuredPlayerId: string,
+  outgoingPlayerId: string,
   replacementPlayerId: string,
 ): GameLogState {
   const idx = state.points.findIndex((p) => p.result === undefined);
   if (idx === -1) throw new Error("No point in progress");
   const point = state.points[idx]!;
-  if (injuredPlayerId === replacementPlayerId) {
-    throw new Error("Replacement must differ from the injured player");
+  if (outgoingPlayerId === replacementPlayerId) {
+    throw new Error("Replacement must differ from the player coming off");
   }
   // Checked against who's actually on the field, not the starting 7: a player
-  // subbed in earlier this point can get hurt themselves (and used to be
-  // rejected as "not on this line"), and one already subbed off can be
-  // brought back if they recover.
+  // subbed in earlier this point can come off themselves (and used to be
+  // rejected as "not on this line"), and one already subbed off can come back.
   const onField = effectiveOnField(point);
-  if (!onField.includes(injuredPlayerId)) {
-    throw new Error("Injured player is not on this line");
+  if (!onField.includes(outgoingPlayerId)) {
+    throw new Error("That player is not on this line");
   }
   if (onField.includes(replacementPlayerId)) {
     throw new Error("Replacement is already on this line");
@@ -304,7 +307,7 @@ export function injurySub(
     ...point,
     substitutions: [
       ...(point.substitutions ?? []),
-      { injuredPlayerId, replacementPlayerId },
+      { injuredPlayerId: outgoingPlayerId, replacementPlayerId },
     ],
   };
   return {

@@ -15,7 +15,7 @@ export type OutboxEventType =
   | "start"
   | "confirmLine"
   | "recordResult"
-  | "injurySub"
+  | "substitute"
   | "editLineup"
   | "halftime"
   | "timeout"

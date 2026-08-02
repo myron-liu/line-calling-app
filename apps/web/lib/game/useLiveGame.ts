@@ -11,7 +11,7 @@ import {
   editPoint,
   editPointLineup,
   endGame,
-  injurySub,
+  substitute,
   recordResult,
   redoAction as replayRedo,
   removeStatEvent,
@@ -172,7 +172,14 @@ export interface LiveGame {
     removeStatEvent: (eventId: string) => void;
     callHalftime: () => void;
     callTimeout: (team: PointResult) => void;
-    injurySub: (injuredPlayerId: string, replacementPlayerId: string) => void;
+    /** Swap a player off the field mid-point. `markInjured` locks the
+     *  outgoing player out of later lines; a routine rotation leaves them
+     *  available, which is what keeps the bench from draining away. */
+    substitute: (
+      outgoingPlayerId: string,
+      replacementPlayerId: string,
+      markInjured: boolean,
+    ) => void;
     editPointLineup: (pointId: string, lineup: string[]) => void;
     /** Retroactive correction to an already-played point — lineup, result,
      *  scoring credit, or its Ds and turnovers (§ edit point). */
@@ -542,15 +549,23 @@ export function useLiveGame(gameId: string): LiveGameResult {
           if (!log) return;
           commit(callTimeout(log, team), "timeout", { team });
         }),
-      injurySub: (injuredPlayerId: string, replacementPlayerId: string) =>
+      substitute: (
+        outgoingPlayerId: string,
+        replacementPlayerId: string,
+        markInjured: boolean,
+      ) =>
         run(() => {
           if (!log) return;
-          commit(injurySub(log, injuredPlayerId, replacementPlayerId), "injurySub", {
-            injuredPlayerId,
+          commit(substitute(log, outgoingPlayerId, replacementPlayerId), "substitute", {
+            outgoingPlayerId,
             replacementPlayerId,
+            markInjured,
           });
-          // Lock the injured player out of future lines this game (§8).
-          setRoster(setRosterInjured(gameId, injuredPlayerId, true));
+          // Only an actual injury locks the player out of later lines (§8).
+          // A rotation leaves them eligible, so they can come straight back on.
+          if (markInjured) {
+            setRoster(setRosterInjured(gameId, outgoingPlayerId, true));
+          }
         }),
       editPoint: (pointId: string, edit: PointEdit) =>
         run(() => {

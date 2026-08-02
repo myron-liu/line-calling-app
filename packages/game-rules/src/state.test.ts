@@ -6,7 +6,7 @@ import {
   recordResult,
   callHalftime,
   callTimeout,
-  injurySub,
+  substitute,
   endGame,
   editPointLineup,
   editPoint,
@@ -172,7 +172,7 @@ describe("injury hot-sub", () => {
       ["a", "b", "c", "d", "e", "f", "g"],
       "pt-1",
     );
-    const subbed = injurySub(s, "a", "z");
+    const subbed = substitute(s, "a", "z");
     expect(subbed.points[0]!.substitutions).toEqual([
       { injuredPlayerId: "a", replacementPlayerId: "z" },
     ]);
@@ -190,8 +190,8 @@ describe("injury hot-sub", () => {
       ["a", "b", "c", "d", "e", "f", "g"],
       "pt-1",
     );
-    expect(() => injurySub(s, "a", "b")).toThrow();
-    expect(() => injurySub(s, "a", "a")).toThrow();
+    expect(() => substitute(s, "a", "b")).toThrow();
+    expect(() => substitute(s, "a", "a")).toThrow();
   });
 });
 
@@ -376,7 +376,7 @@ describe("recorded stats", () => {
 
   test("accepts a player subbed in for an injury, and rejects the one subbed out", () => {
     let s = confirmLine(game, fresh(), lineup, "pt-1");
-    s = injurySub(s, "a", "sub");
+    s = substitute(s, "a", "sub");
     s = addStatEvent(s, { id: "e1", playerId: "sub", type: "block" });
     expect(playerStatTotals(s.points)["sub"]!.blocks).toBe(1);
     expect(() =>
@@ -450,10 +450,10 @@ describe("injury sub", () => {
 
   test("a player subbed in can themselves be subbed off", () => {
     let s = confirmLine(game, fresh(), lineup, "pt-1");
-    s = injurySub(s, "a", "x");
+    s = substitute(s, "a", "x");
     // x is on the field now, even though the starting 7 never mentioned them.
     expect(deriveLiveGameState(game, s.points, s.meta).currentLineup).toContain("x");
-    s = injurySub(s, "x", "y");
+    s = substitute(s, "x", "y");
     const onField = deriveLiveGameState(game, s.points, s.meta).currentLineup;
     expect(onField).toContain("y");
     expect(onField).not.toContain("x");
@@ -462,16 +462,16 @@ describe("injury sub", () => {
 
   test("a starter subbed off can come back on", () => {
     let s = confirmLine(game, fresh(), lineup, "pt-1");
-    s = injurySub(s, "a", "x");
-    s = injurySub(s, "x", "a");
+    s = substitute(s, "a", "x");
+    s = substitute(s, "x", "a");
     expect(deriveLiveGameState(game, s.points, s.meta).currentLineup).toContain("a");
   });
 
   test("still rejects someone who isn't on the field, or a no-op swap", () => {
     const s = confirmLine(game, fresh(), lineup, "pt-1");
-    expect(() => injurySub(s, "z", "x")).toThrow("not on this line");
-    expect(() => injurySub(s, "a", "b")).toThrow("already on this line");
-    expect(() => injurySub(s, "a", "a")).toThrow("must differ");
+    expect(() => substitute(s, "z", "x")).toThrow("not on this line");
+    expect(() => substitute(s, "a", "b")).toThrow("already on this line");
+    expect(() => substitute(s, "a", "a")).toThrow("must differ");
   });
 });
 
@@ -560,5 +560,36 @@ describe("editPoint", () => {
     expect(() => editPoint(game, inProgress, "pt-2", { result: "us" })).toThrow(
       "from the live caller",
     );
+  });
+});
+
+describe("rotation subs", () => {
+  const lineup = ["a", "b", "c", "d", "e", "f", "g"];
+
+  test("a player subbed off can be rotated straight back on", () => {
+    let s = confirmLine(game, fresh(), lineup, "pt-1");
+    s = substitute(s, "a", "x");
+    s = substitute(s, "x", "a");
+    const onField = deriveLiveGameState(game, s.points, s.meta).currentLineup;
+    expect(onField).toContain("a");
+    expect(onField).not.toContain("x");
+  });
+
+  test("several rotations in one point all resolve", () => {
+    let s = confirmLine(game, fresh(), lineup, "pt-1");
+    s = substitute(s, "a", "x");
+    s = substitute(s, "b", "y");
+    s = substitute(s, "c", "z");
+    const onField = deriveLiveGameState(game, s.points, s.meta).currentLineup;
+    expect(onField.sort()).toEqual(["d", "e", "f", "g", "x", "y", "z"].sort());
+  });
+
+  test("the starting 7 is preserved for stats regardless of subs", () => {
+    let s = confirmLine(game, fresh(), lineup, "pt-1");
+    s = substitute(s, "a", "x");
+    s = recordResult(game, s, "us");
+    const live = deriveLiveGameState(game, s.points, s.meta);
+    expect(live.pointsPlayed["a"]).toBe(1); // started, so it counts
+    expect(live.pointsPlayed["x"]).toBeUndefined(); // came on, doesn't
   });
 });
