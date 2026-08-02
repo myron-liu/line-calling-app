@@ -289,10 +289,15 @@ export function injurySub(
   if (injuredPlayerId === replacementPlayerId) {
     throw new Error("Replacement must differ from the injured player");
   }
-  if (!point.lineup.includes(injuredPlayerId)) {
+  // Checked against who's actually on the field, not the starting 7: a player
+  // subbed in earlier this point can get hurt themselves (and used to be
+  // rejected as "not on this line"), and one already subbed off can be
+  // brought back if they recover.
+  const onField = effectiveOnField(point);
+  if (!onField.includes(injuredPlayerId)) {
     throw new Error("Injured player is not on this line");
   }
-  if (point.lineup.includes(replacementPlayerId)) {
+  if (onField.includes(replacementPlayerId)) {
     throw new Error("Replacement is already on this line");
   }
   const updated: Point = {
@@ -373,6 +378,76 @@ export function editPointLineup(
       p.id === pointId ? { ...p, lineup: [...newLineup] } : p,
     ),
     meta: state.meta,
+  };
+}
+
+/**
+ * A retroactive correction to an already-played point (§ edit point). Every
+ * field is optional; an omitted one is left alone. `scoring: null` clears the
+ * goal/Callahan detail, which an omitted key can't express.
+ */
+export interface PointEdit {
+  lineup?: string[];
+  result?: PointResult;
+  scoring?: Scoring | null;
+  statEvents?: StatEvent[];
+}
+
+/**
+ * Amend a point after the fact — who was on, who scored it, and the Ds and
+ * turnovers recorded against it. Reached from the line-history tab and the
+ * end-game recap, for the inevitable "that was Sam, not Alex".
+ *
+ * Flipping a result rewrites the score, so halftime is re-derived from the
+ * amended log. What it deliberately does *not* do is re-derive later points'
+ * stored O/D: those record which side the team actually started each point
+ * on, and that really happened regardless of a scoring correction made
+ * afterward. Rewriting them would silently contradict the coach's own record
+ * of the game.
+ *
+ * Editing the in-progress point's result isn't allowed — that's what
+ * recordResult is for, and letting it through here would leave the game with
+ * no point in progress and no advance.
+ */
+export function editPoint(
+  game: GameRules,
+  state: GameLogState,
+  pointId: string,
+  edit: PointEdit,
+): GameLogState {
+  const idx = state.points.findIndex((p) => p.id === pointId);
+  if (idx === -1) throw new Error("No such point");
+  const point = state.points[idx]!;
+  if (edit.result !== undefined && point.result === undefined) {
+    throw new Error("Record the result from the live caller, not the history");
+  }
+  if (edit.lineup && edit.lineup.length !== point.lineup.length) {
+    throw new Error(`A line needs exactly ${point.lineup.length} players`);
+  }
+  if (edit.lineup && new Set(edit.lineup).size !== edit.lineup.length) {
+    throw new Error("That line has the same player on it twice");
+  }
+
+  const result = edit.result ?? point.result;
+  const updated: Point = {
+    ...point,
+    lineup: edit.lineup ? [...edit.lineup] : point.lineup,
+    result,
+    // Scoring detail only survives on a point we won — flipping the result to
+    // "them" drops it rather than leaving a goal credited on a point we lost.
+    scoring:
+      result !== "us"
+        ? undefined
+        : edit.scoring === null
+          ? undefined
+          : (edit.scoring ?? point.scoring),
+    statEvents: edit.statEvents ? [...edit.statEvents] : point.statEvents,
+  };
+
+  const points = state.points.map((p, i) => (i === idx ? updated : p));
+  return {
+    points,
+    meta: { ...state.meta, halftimeReached: deriveHalftimeReached(game, points) },
   };
 }
 

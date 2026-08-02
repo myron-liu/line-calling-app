@@ -9,6 +9,7 @@ import {
   injurySub,
   endGame,
   editPointLineup,
+  editPoint,
   undoLastPoint,
   redoAction,
   addStatEvent,
@@ -441,5 +442,123 @@ describe("efficiency", () => {
     const played = { holds: 3, broken: 1, breaks: 1, opponentHolds: 3 };
     expect(offensiveEfficiency(played)).toBe(0.75);
     expect(defensiveEfficiency(played)).toBe(0.25);
+  });
+});
+
+describe("injury sub", () => {
+  const lineup = ["a", "b", "c", "d", "e", "f", "g"];
+
+  test("a player subbed in can themselves be subbed off", () => {
+    let s = confirmLine(game, fresh(), lineup, "pt-1");
+    s = injurySub(s, "a", "x");
+    // x is on the field now, even though the starting 7 never mentioned them.
+    expect(deriveLiveGameState(game, s.points, s.meta).currentLineup).toContain("x");
+    s = injurySub(s, "x", "y");
+    const onField = deriveLiveGameState(game, s.points, s.meta).currentLineup;
+    expect(onField).toContain("y");
+    expect(onField).not.toContain("x");
+    expect(onField).not.toContain("a");
+  });
+
+  test("a starter subbed off can come back on", () => {
+    let s = confirmLine(game, fresh(), lineup, "pt-1");
+    s = injurySub(s, "a", "x");
+    s = injurySub(s, "x", "a");
+    expect(deriveLiveGameState(game, s.points, s.meta).currentLineup).toContain("a");
+  });
+
+  test("still rejects someone who isn't on the field, or a no-op swap", () => {
+    const s = confirmLine(game, fresh(), lineup, "pt-1");
+    expect(() => injurySub(s, "z", "x")).toThrow("not on this line");
+    expect(() => injurySub(s, "a", "b")).toThrow("already on this line");
+    expect(() => injurySub(s, "a", "a")).toThrow("must differ");
+  });
+});
+
+describe("editPoint", () => {
+  const lineup = ["a", "b", "c", "d", "e", "f", "g"];
+
+  test("swaps a player without touching the score", () => {
+    let s = fresh();
+    s = playPoint(s, "us", lineup);
+    s = editPoint(game, s, "pt-1", {
+      lineup: ["a", "b", "c", "d", "e", "f", "h"],
+    });
+    const live = deriveLiveGameState(game, s.points, s.meta);
+    expect(live.ourScore).toBe(1);
+    expect(live.pointsPlayed["g"]).toBeUndefined();
+    expect(live.pointsPlayed["h"]).toBe(1);
+  });
+
+  test("flipping the result rewrites the score", () => {
+    let s = fresh();
+    s = playPoint(s, "us", lineup);
+    expect(deriveLiveGameState(game, s.points, s.meta).ourScore).toBe(1);
+    s = editPoint(game, s, "pt-1", { result: "them" });
+    const live = deriveLiveGameState(game, s.points, s.meta);
+    expect(live.ourScore).toBe(0);
+    expect(live.theirScore).toBe(1);
+  });
+
+  test("flipping a win to a loss drops its scoring credit", () => {
+    let s = confirmLine(game, fresh(), lineup, "pt-1");
+    s = recordResult(game, s, "us", undefined, {
+      kind: "goal",
+      assistPlayerId: "a",
+      goalPlayerId: "b",
+    });
+    s = editPoint(game, s, "pt-1", { result: "them" });
+    expect(s.points[0]!.scoring).toBeUndefined();
+    expect(playerStatTotals(s.points)["b"]?.goals ?? 0).toBe(0);
+  });
+
+  test("corrects who got credited, and clears scoring on request", () => {
+    let s = confirmLine(game, fresh(), lineup, "pt-1");
+    s = recordResult(game, s, "us", undefined, {
+      kind: "goal",
+      assistPlayerId: "a",
+      goalPlayerId: "b",
+    });
+    s = editPoint(game, s, "pt-1", {
+      scoring: { kind: "goal", assistPlayerId: "c", goalPlayerId: "d" },
+      statEvents: [{ id: "e1", playerId: "e", type: "block" }],
+    });
+    let totals = playerStatTotals(s.points);
+    expect(totals["a"]?.assists ?? 0).toBe(0);
+    expect(totals["c"]!.assists).toBe(1);
+    expect(totals["d"]!.goals).toBe(1);
+    expect(totals["e"]!.blocks).toBe(1);
+
+    s = editPoint(game, s, "pt-1", { scoring: null });
+    totals = playerStatTotals(s.points);
+    expect(totals["d"]?.goals ?? 0).toBe(0);
+    expect(totals["e"]!.blocks).toBe(1); // untouched by a scoring-only edit
+  });
+
+  test("re-derives halftime when an edit moves the score back across it", () => {
+    let s = fresh();
+    for (let i = 0; i < 7; i++) s = playPoint(s, "us", lineup);
+    expect(s.meta.halftimeReached).toBe(true);
+    s = editPoint(game, s, "pt-7", { result: "them" });
+    expect(s.meta.halftimeReached).toBe(false);
+  });
+
+  test("rejects a bad edit", () => {
+    let s = fresh();
+    s = playPoint(s, "us", lineup);
+    expect(() => editPoint(game, s, "nope", {})).toThrow("No such point");
+    expect(() => editPoint(game, s, "pt-1", { lineup: ["a", "b"] })).toThrow(
+      "exactly 7 players",
+    );
+    expect(() =>
+      editPoint(game, s, "pt-1", {
+        lineup: ["a", "a", "c", "d", "e", "f", "g"],
+      }),
+    ).toThrow("same player on it twice");
+
+    const inProgress = confirmLine(game, s, lineup, "pt-2");
+    expect(() => editPoint(game, inProgress, "pt-2", { result: "us" })).toThrow(
+      "from the live caller",
+    );
   });
 });

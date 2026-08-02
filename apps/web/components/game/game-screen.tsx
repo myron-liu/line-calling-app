@@ -9,6 +9,7 @@ import type {
   Point,
   PlayerPointOutcomes,
   PlayerStatTotals,
+  PointEdit,
 } from "@shared/game-rules";
 import {
   defensiveEfficiency,
@@ -25,6 +26,7 @@ import { findTournament } from "@/lib/storage/tournaments";
 import { displayName } from "@/lib/player-display";
 import type { RosterSnapshotEntry } from "@/lib/storage/gameLog";
 import { LiveCaller } from "./live-caller";
+import { PointEditModal } from "./point-edit-modal";
 
 // One route, three surfaces (§16). The live caller and recap key off the derived
 // phase from the engine.
@@ -278,7 +280,7 @@ function Recap({ live }: { live: LiveGame }) {
 
       <OverallStats outcomes={outcomes} />
 
-      <LineHistory points={points} byId={byId} />
+      <LineHistory points={points} byId={byId} onEditPoint={actions.editPoint} roster={roster} />
 
       <PointsPlayedTables
         roster={roster}
@@ -331,10 +333,15 @@ function StatTile({ label, value }: { label: string; value: number | string }) {
 function LineHistory({
   points,
   byId,
+  roster,
+  onEditPoint,
 }: {
   points: Point[];
   byId: Map<string, RosterSnapshotEntry>;
+  roster: RosterSnapshotEntry[];
+  onEditPoint: (pointId: string, edit: PointEdit) => void;
 }) {
+  const [editing, setEditing] = useState<Point | null>(null);
   const nameFor = (id: string) => {
     const p = byId.get(id);
     return p ? displayName(p) : id;
@@ -388,6 +395,14 @@ function LineHistory({
                   {t.before.our}-{t.before.their} → {t.after.our}-{t.after.their}
                 </span>
               )}
+              {p.result !== undefined && (
+                <button
+                  onClick={() => setEditing(p)}
+                  className="ml-auto rounded-md border border-line-strong px-2 py-0.5 text-xs"
+                >
+                  Edit
+                </button>
+              )}
             </div>
             <p className="mt-1 text-faint">
               {p.lineup.map((id) => nameFor(id)).join(", ")}
@@ -409,6 +424,18 @@ function LineHistory({
           );
         })}
       </ul>
+
+      {editing && (
+        <PointEditModal
+          point={editing}
+          roster={roster}
+          onClose={() => setEditing(null)}
+          onSave={(edit) => {
+            onEditPoint(editing.id, edit);
+            setEditing(null);
+          }}
+        />
+      )}
     </details>
   );
 }

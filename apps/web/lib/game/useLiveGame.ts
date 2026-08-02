@@ -8,6 +8,7 @@ import {
   confirmLine,
   deriveHalftimeReached,
   deriveLiveGameState,
+  editPoint,
   editPointLineup,
   endGame,
   injurySub,
@@ -24,6 +25,7 @@ import {
   type Point,
   type PointResult,
   type RedoAction,
+  type PointEdit,
   type SavedLine,
   type Scoring,
   type StatEventType,
@@ -172,6 +174,9 @@ export interface LiveGame {
     callTimeout: (team: PointResult) => void;
     injurySub: (injuredPlayerId: string, replacementPlayerId: string) => void;
     editPointLineup: (pointId: string, lineup: string[]) => void;
+    /** Retroactive correction to an already-played point — lineup, result,
+     *  scoring credit, or its Ds and turnovers (§ edit point). */
+    editPoint: (pointId: string, edit: PointEdit) => void;
     endGame: () => void;
     undo: () => void;
     /** Reapplies exactly what the last undo reverted; available until any
@@ -546,6 +551,14 @@ export function useLiveGame(gameId: string): LiveGameResult {
           });
           // Lock the injured player out of future lines this game (§8).
           setRoster(setRosterInjured(gameId, injuredPlayerId, true));
+        }),
+      editPoint: (pointId: string, edit: PointEdit) =>
+        run(() => {
+          if (!game || !log) return;
+          commit(editPoint(game, log, pointId, edit), "editLineup", {
+            pointId,
+            ...edit,
+          });
         }),
       editPointLineup: (pointId: string, lineup: string[]) =>
         run(() => {

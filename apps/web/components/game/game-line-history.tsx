@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { ratioCounts, ratioForPoint, type Point } from "@shared/game-rules";
 import type { LiveGame } from "@/lib/game/useLiveGame";
 import { isRosterActive, type RosterSnapshotEntry } from "@/lib/storage/gameLog";
 import { displayName, sortRoster } from "@/lib/player-display";
+import { PointEditModal } from "./point-edit-modal";
 
 /** The "Line history" tab of the live caller: every line this game has put on
  *  the field, newest first, with the one still out there at the top. Picking
@@ -16,7 +17,8 @@ export function LineHistory({
   live: LiveGame;
   onUseLine: (lineup: string[]) => void;
 }) {
-  const { game, roster, points, state } = live;
+  const { game, roster, points, state, actions } = live;
+  const [editing, setEditing] = useState<Point | null>(null);
 
   const byId = useMemo(
     () => new Map(roster.map((p) => [p.playerId, p])),
@@ -78,9 +80,22 @@ export function LineHistory({
                 eligibleIds={eligibleIds}
                 need={need}
                 onUse={() => onUseLine(point.lineup)}
+                onEdit={point.result !== undefined ? () => setEditing(point) : undefined}
               />
             ))}
         </ul>
+      )}
+
+      {editing && (
+        <PointEditModal
+          point={editing}
+          roster={roster}
+          onClose={() => setEditing(null)}
+          onSave={(edit) => {
+            actions.editPoint(editing.id, edit);
+            setEditing(null);
+          }}
+        />
       )}
     </div>
   );
@@ -166,6 +181,7 @@ function HistoryRow({
   eligibleIds,
   need,
   onUse,
+  onEdit,
 }: {
   point: Point;
   /** Running score either side of this point. */
@@ -175,6 +191,8 @@ function HistoryRow({
   /** Null for a non-mixed game: any lineup is ratio-viable. */
   need: { mmp: number; wmp: number } | null;
   onUse: () => void;
+  /** Omitted for the point still being played — correct that one live. */
+  onEdit?: () => void;
 }) {
   const players = sortRoster(
     point.lineup.map((id) => byId.get(id)).filter((p): p is RosterSnapshotEntry => !!p),
@@ -228,13 +246,23 @@ function HistoryRow({
             {mmp}M/{wmp}W
           </span>
         </div>
-        <button
-          onClick={onUse}
-          disabled={!viable}
-          className="shrink-0 rounded-md border border-line-strong px-2.5 py-1 text-sm disabled:opacity-40"
-        >
-          Use line
-        </button>
+        <div className="flex shrink-0 gap-1.5">
+          {onEdit && (
+            <button
+              onClick={onEdit}
+              className="rounded-md border border-line-strong px-2.5 py-1 text-sm"
+            >
+              Edit
+            </button>
+          )}
+          <button
+            onClick={onUse}
+            disabled={!viable}
+            className="rounded-md border border-line-strong px-2.5 py-1 text-sm disabled:opacity-40"
+          >
+            Use line
+          </button>
+        </div>
       </div>
       <p className="mt-1 text-sm">{players.map((p) => displayName(p)).join(" · ")}</p>
       <PointStatLine point={point} byId={byId} />
