@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { Point, PointEdit, Scoring, StatEvent } from "@shared/game-rules";
 import { Modal } from "@/components/modal";
 import { isRosterActive, type RosterSnapshotEntry } from "@/lib/storage/gameLog";
@@ -43,9 +43,22 @@ export function PointEditModal({
     .map((id) => byId.get(id))
     .filter((p): p is RosterSnapshotEntry => !!p);
 
-  // Credit can only go to someone who was on the point, so every picker below
-  // draws from the (possibly just-edited) lineup rather than the full roster.
-  const creditable = sortRoster(onLine);
+  // Who can hold credit on this point. The starting line is not enough: a
+  // player subbed on mid-point can absolutely get a D, and anyone *already*
+  // credited has to stay selectable — otherwise their <select> would find no
+  // matching option, silently fall back to the first name in the list, and
+  // reassign their stat the moment the coach hit Save.
+  const creditable = useMemo(() => {
+    const ids = new Set(lineup);
+    for (const s of point.substitutions ?? []) ids.add(s.replacementPlayerId);
+    for (const e of events) ids.add(e.playerId);
+    if (scoring?.kind === "callahan") ids.add(scoring.playerId);
+    if (scoring?.kind === "goal") {
+      ids.add(scoring.goalPlayerId);
+      if (scoring.assistPlayerId) ids.add(scoring.assistPlayerId);
+    }
+    return sortRoster(roster.filter((p) => ids.has(p.playerId)));
+  }, [lineup, events, scoring, point.substitutions, roster]);
 
   const save = () =>
     onSave({
