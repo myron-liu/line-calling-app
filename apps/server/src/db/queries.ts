@@ -11,6 +11,7 @@ import {
   deriveLiveGameState,
   emptyStatTotals,
   playerPointOutcomes,
+  playerSecondsPlayed,
   playerStatTotals,
   pointsPlayed,
   teamPointOutcomes,
@@ -1124,6 +1125,9 @@ export interface TournamentPlayerStats {
   dPointsPlayed: number;
   oPlusMinus: number;
   dPlusMinus: number;
+  /** Total time on the field, in seconds — same counting convention as
+   *  pointsPlayed (starting lineup of completed points). */
+  secondsPlayed: number;
   assists: number;
   goals: number;
   blocks: number;
@@ -1180,6 +1184,7 @@ export async function getTournamentStats(
     const played = pointsPlayed(pts);
     const perPlayerOutcomes = playerPointOutcomes(pts);
     const statTotals = playerStatTotals(pts);
+    const seconds = playerSecondsPlayed(pts);
     const rosterById = new Map(rosterRows.map((r) => [r.playerId, toRosterEntry(r)]));
 
     // Union of both keyings: points-played only counts *completed* points,
@@ -1205,9 +1210,11 @@ export async function getTournamentStats(
         dPointsPlayed: 0,
         oPlusMinus: 0,
         dPlusMinus: 0,
+        secondsPlayed: 0,
         ...emptyStatTotals(),
       };
       entry.pointsPlayed += played[playerId] ?? 0;
+      entry.secondsPlayed += seconds[playerId] ?? 0;
       const o = perPlayerOutcomes[playerId];
       if (o) {
         entry.oPointsPlayed += o.oPointsPlayed;

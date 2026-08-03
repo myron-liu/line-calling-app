@@ -23,6 +23,7 @@ type StatSortKey =
   | "dPlusMinus"
   | "oPointsPlayed"
   | "oPlusMinus"
+  | "secondsPlayed"
   | "dEfficiency"
   | "oEfficiency"
   | "assists"
@@ -79,6 +80,18 @@ export function TournamentStats({ tournamentId }: { tournamentId: string }) {
   const [stats, setStats] = useState<TournamentStatsData | null>(null);
   const [sort, setSort] = useState<StatSort>({ key: "pointsPlayed", dir: "desc" });
   const onSort = (key: StatSortKey) => setSort((cur) => toggleStatSort(cur, key));
+  const [groupId, setGroupId] = useState(COLUMN_GROUPS[0]!.id);
+  const group = COLUMN_GROUPS.find((g) => g.id === groupId) ?? COLUMN_GROUPS[0]!;
+
+  // Sorting by a column that just disappeared would leave the arrow nowhere
+  // and the order unexplained, so switching groups falls back to points.
+  const selectGroup = (id: string) => {
+    setGroupId(id);
+    const next = COLUMN_GROUPS.find((g) => g.id === id);
+    if (next && !next.columns.some((c) => c.key === sort.key) && sort.key !== "name") {
+      setSort({ key: "pointsPlayed", dir: "desc" });
+    }
+  };
 
   useEffect(() => {
     findTournament(tournamentId).then((t) => {
@@ -141,6 +154,23 @@ export function TournamentStats({ tournamentId }: { tournamentId: string }) {
         </div>
       </div>
 
+      <div className="flex gap-1 border-b border-line text-sm">
+        {COLUMN_GROUPS.map((g) => (
+          <button
+            key={g.id}
+            onClick={() => selectGroup(g.id)}
+            aria-current={g.id === groupId ? "true" : undefined}
+            className={`-mb-px border-b-2 px-3 py-1.5 ${
+              g.id === groupId
+                ? "border-emerald-600 font-medium text-emerald-700 dark:text-emerald-400"
+                : "border-transparent text-muted"
+            }`}
+          >
+            {g.label}
+          </button>
+        ))}
+      </div>
+
       <div className="space-y-2">
         {stats.players.length === 0 ? (
           <p className="text-sm text-muted">No completed points yet.</p>
@@ -153,6 +183,7 @@ export function TournamentStats({ tournamentId }: { tournamentId: string }) {
                 players={stats.players.filter((p) => p.genderMatch === "MMP")}
                 sort={sort}
                 onSort={onSort}
+                columns={group.columns}
               />
             </div>
             <div className="min-w-[280px] flex-1">
@@ -162,6 +193,7 @@ export function TournamentStats({ tournamentId }: { tournamentId: string }) {
                 players={stats.players.filter((p) => p.genderMatch === "WMP")}
                 sort={sort}
                 onSort={onSort}
+                columns={group.columns}
               />
             </div>
           </div>
@@ -171,6 +203,7 @@ export function TournamentStats({ tournamentId }: { tournamentId: string }) {
             players={stats.players}
             sort={sort}
             onSort={onSort}
+            columns={group.columns}
           />
         )}
       </div>
@@ -185,10 +218,6 @@ function StatTile({ label, value }: { label: string; value: number | string }) {
       <p className="text-xs text-faint">{label}</p>
     </div>
   );
-}
-
-function formatPlusMinus(n: number): string {
-  return n > 0 ? `+${n}` : `${n}`;
 }
 
 /** A dash rather than "0%" when no points of that kind have been played —
@@ -240,53 +269,100 @@ function SortableTh({
 /** Every sortable stat column in display order, with the tooltip shown on
  *  hover — the headers are abbreviated hard to fit a phone, so the long name
  *  has to live somewhere. */
-const STAT_COLUMNS: {
+interface StatColumn {
   key: Exclude<StatSortKey, "name">;
   label: string;
   hint: string;
-}[] = [
-  { key: "pointsPlayed", label: "Pts", hint: "Points played" },
-  { key: "dPointsPlayed", label: "D Pts", hint: "D points played" },
-  { key: "dPlusMinus", label: "D +/-", hint: "D plus/minus" },
+  /** How to render it; plain counts get the dimmed-zero treatment. */
+  render: (p: TournamentPlayerStats) => React.ReactNode;
+}
+
+/**
+ * The stats table split into two groups, because twelve columns don't fit on a
+ * phone and reading across them wasn't useful anyway — playing time answers
+ * "who's tired and who hasn't touched the field", the in-point stats answer
+ * "who's doing what out there". One group is shown at a time.
+ *
+ * Deliberately no +/- columns: with O Pts and O% both present, plus/minus is
+ * derivable and was just spending width.
+ */
+const COLUMN_GROUPS: { id: string; label: string; columns: StatColumn[] }[] = [
   {
-    key: "dEfficiency",
-    label: "D%",
-    hint: "Defensive efficiency — share of their D points won",
+    id: "time",
+    label: "Playing time",
+    columns: [
+      {
+        key: "pointsPlayed",
+        label: "Pts",
+        hint: "Points played",
+        render: (p) => <Num>{p.pointsPlayed}</Num>,
+      },
+      {
+        key: "secondsPlayed",
+        label: "Min",
+        hint: "Minutes on the field",
+        render: (p) => <Num>{formatMinutes(p.secondsPlayed)}</Num>,
+      },
+      {
+        key: "oPointsPlayed",
+        label: "O Pts",
+        hint: "Points played starting on offence",
+        render: (p) => <Num>{p.oPointsPlayed}</Num>,
+      },
+      {
+        key: "oEfficiency",
+        label: "O%",
+        hint: "Offensive efficiency — share of their O points won",
+        render: (p) => (
+          <Num strong>
+            {formatPercent(efficiencyFromPlusMinus(p.oPointsPlayed, p.oPlusMinus))}
+          </Num>
+        ),
+      },
+      {
+        key: "dPointsPlayed",
+        label: "D Pts",
+        hint: "Points played starting on defence",
+        render: (p) => <Num>{p.dPointsPlayed}</Num>,
+      },
+      {
+        key: "dEfficiency",
+        label: "D%",
+        hint: "Defensive efficiency — share of their D points won",
+        render: (p) => (
+          <Num strong>
+            {formatPercent(efficiencyFromPlusMinus(p.dPointsPlayed, p.dPlusMinus))}
+          </Num>
+        ),
+      },
+    ],
   },
-  { key: "oPointsPlayed", label: "O Pts", hint: "O points played" },
-  { key: "oPlusMinus", label: "O +/-", hint: "O plus/minus" },
   {
-    key: "oEfficiency",
-    label: "O%",
-    hint: "Offensive efficiency — share of their O points won",
+    id: "inpoint",
+    label: "In point",
+    columns: [
+      { key: "assists", label: "A", hint: "Assists", render: (p) => <StatCell value={p.assists} /> },
+      { key: "goals", label: "G", hint: "Goals", render: (p) => <StatCell value={p.goals} /> },
+      { key: "blocks", label: "D", hint: "Defensive blocks", render: (p) => <StatCell value={p.blocks} /> },
+      { key: "turnovers", label: "T", hint: "Turnovers", render: (p) => <StatCell value={p.turnovers} /> },
+      { key: "callahans", label: "C", hint: "Callahans", render: (p) => <StatCell value={p.callahans} /> },
+    ],
   },
-  { key: "assists", label: "A", hint: "Assists" },
-  { key: "goals", label: "G", hint: "Goals" },
-  { key: "blocks", label: "D", hint: "Defensive blocks" },
-  { key: "turnovers", label: "T", hint: "Turnovers" },
-  { key: "callahans", label: "C", hint: "Callahans" },
 ];
 
-function NumCell({ children }: { children: React.ReactNode }) {
-  return (
-    <td className="border-b border-line py-1 text-right tabular-nums text-muted">
-      {children}
-    </td>
-  );
+/** Minutes on the field, rounded — seconds are noise at this scale. */
+function formatMinutes(seconds: number): string {
+  return `${Math.round(seconds / 60)}`;
+}
+
+function Num({ children, strong }: { children: React.ReactNode; strong?: boolean }) {
+  return <span className={strong ? "" : "text-muted"}>{children}</span>;
 }
 
 /** A hand-recorded count. Zeros are dimmed further so the numbers that were
  *  actually recorded stand out in a table that's mostly zeros early on. */
 function StatCell({ value }: { value: number }) {
-  return (
-    <td
-      className={`border-b border-line py-1 text-right tabular-nums ${
-        value === 0 ? "text-faint" : "text-fg"
-      }`}
-    >
-      {value}
-    </td>
-  );
+  return <span className={value === 0 ? "text-faint" : "text-fg"}>{value}</span>;
 }
 
 function PlayerStatsTable({
@@ -295,6 +371,7 @@ function PlayerStatsTable({
   players,
   sort,
   onSort,
+  columns,
 }: {
   /** Omitted for a single-division tournament, where MMP/WMP is redundant. */
   label?: string;
@@ -302,6 +379,7 @@ function PlayerStatsTable({
   players: TournamentPlayerStats[];
   sort: StatSort;
   onSort: (key: StatSortKey) => void;
+  columns: StatColumn[];
 }) {
   const rows = [...players].sort((a, b) => compareStatRows(a, b, sort));
 
@@ -319,7 +397,7 @@ function PlayerStatsTable({
             align="left"
             toneClassName={label ? headerTone : undefined}
           />
-          {STAT_COLUMNS.map((c) => (
+          {columns.map((c) => (
             <SortableTh
               key={c.key}
               label={c.label}
@@ -336,22 +414,14 @@ function PlayerStatsTable({
         {rows.map((p) => (
           <tr key={p.playerId}>
             <td className="border-b border-line py-1">{displayName(p)}</td>
-            <NumCell>{p.pointsPlayed}</NumCell>
-            <NumCell>{p.dPointsPlayed}</NumCell>
-            <NumCell>{formatPlusMinus(p.dPlusMinus)}</NumCell>
-            <NumCell>
-              {formatPercent(efficiencyFromPlusMinus(p.dPointsPlayed, p.dPlusMinus))}
-            </NumCell>
-            <NumCell>{p.oPointsPlayed}</NumCell>
-            <NumCell>{formatPlusMinus(p.oPlusMinus)}</NumCell>
-            <NumCell>
-              {formatPercent(efficiencyFromPlusMinus(p.oPointsPlayed, p.oPlusMinus))}
-            </NumCell>
-            <StatCell value={p.assists} />
-            <StatCell value={p.goals} />
-            <StatCell value={p.blocks} />
-            <StatCell value={p.turnovers} />
-            <StatCell value={p.callahans} />
+            {columns.map((c) => (
+              <td
+                key={c.key}
+                className="border-b border-line py-1 text-right tabular-nums"
+              >
+                {c.render(p)}
+              </td>
+            ))}
           </tr>
         ))}
       </tbody>
