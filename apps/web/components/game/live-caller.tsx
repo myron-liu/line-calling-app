@@ -39,6 +39,14 @@ import {
   sortRoster,
 } from "@/lib/player-display";
 import { Modal } from "@/components/modal";
+import {
+  CONTINGENCIES,
+  OUTCOME_LABEL,
+  emptyNextLineDrafts,
+  lineForResult,
+  type ContingencyKey,
+  type NextLineDrafts,
+} from "@/lib/game/contingency";
 import { LineHistory } from "./game-line-history";
 
 // ── Game clock (§8) ──────────────────────────────────────────────────────────
@@ -147,7 +155,7 @@ export function LiveCaller({ live }: { live: LiveGame }) {
             onDraftChange={(outcome, ids) =>
               setDrafts((cur) => ({ ...cur, [outcome]: ids }))
             }
-            onResultRecorded={(scorer) => setCarriedLine(drafts[scorer])}
+            onResultRecorded={(scorer) => setCarriedLine(lineForResult(drafts, scorer))}
             replaySeed={replaySeed}
           />
         )}
@@ -427,10 +435,10 @@ function LineBuilder({
   pointNumber: number;
   /** Undefined for a non-mixed team either way. */
   genderRatio: GenderRatio | undefined;
-  /** The side this line will be on. Known in "prepare" mode too: each
-   *  contingency builder is scoped to one outcome of the point in progress,
-   *  and that outcome determines the side (see nextPointIfResult). */
-  od: OD;
+  /** The side this line will be on, or null for the "no matter what"
+   *  contingency — a line meant to work either way, so no side is known and
+   *  side-tagged pods rank equally in its quick-lines bar. */
+  od: OD | null;
   onSelectionChange?: (ids: string[]) => void;
   /** The seven currently on the field, offered as a one-tap "Same line" in
    *  the contingency builders — only when they'd actually be a legal line
@@ -714,8 +722,10 @@ function LineBuilder({
   };
   // Lines/pods tagged for this point's side sort first (untagged/"both" in the
   // middle, the opposite side last), so the relevant quick-fills are right
-  // there without scanning past ones for the other side.
+  // there without scanning past ones for the other side. With no known side
+  // ("no matter what"), only the ones useful either way get a boost.
   const sideMatchRank = (lineSide: SavedLine["side"]): number => {
+    if (!od) return !lineSide || lineSide === "both" ? 0 : 1;
     if (lineSide === od) return 0;
     if (!lineSide || lineSide === "both") return 1;
     return 2;
@@ -1739,7 +1749,7 @@ function InProgressControls({
 }: {
   live: LiveGame;
   drafts: NextLineDrafts;
-  onDraftChange: (outcome: PointResult, ids: string[]) => void;
+  onDraftChange: (outcome: ContingencyKey, ids: string[]) => void;
   /** Fired alongside the result so the caller knows which contingency line
    *  to carry into the next point. */
   onResultRecorded: (scorer: PointResult) => void;
@@ -1818,16 +1828,6 @@ function InProgressControls({
 
 // ── Contingency lines (§ prepare next line) ─────────────────────────────────
 
-/** A prepared line for each way the current point can end, keyed by scorer. */
-export type NextLineDrafts = Record<PointResult, string[]>;
-
-export const emptyNextLineDrafts = (): NextLineDrafts => ({ us: [], them: [] });
-
-const OUTCOME_LABEL: Record<PointResult, string> = {
-  us: "If we score",
-  them: "If they score",
-};
-
 /**
  * Two lines prepared at once, one per outcome — because which side we're on
  * next depends on who wins the point in progress (we score, we pull, so we're
@@ -1846,24 +1846,26 @@ function ContingencyLines({
 }: {
   live: LiveGame;
   drafts: NextLineDrafts;
-  onDraftChange: (outcome: PointResult, ids: string[]) => void;
+  onDraftChange: (outcome: ContingencyKey, ids: string[]) => void;
   replaySeed: { nonce: number; lineup: string[] } | null;
 }) {
   const { game, log } = live;
-  const [tab, setTab] = useState<PointResult>("us");
+  const [tab, setTab] = useState<ContingencyKey>("us");
 
   // Both previews come from the engine running the real recordResult, so
   // halftime and the ABBA ratio are handled for us (see nextPointIfResult).
-  const previews = useMemo(
-    () =>
-      log
-        ? {
-            us: nextPointIfResult(game, log, "us"),
-            them: nextPointIfResult(game, log, "them"),
-          }
-        : null,
-    [game, log],
-  );
+  // The "no matter what" tab shares their point number and ratio — only the
+  // side differs between outcomes — and carries no side of its own.
+  const previews = useMemo(() => {
+    if (!log) return null;
+    const us = nextPointIfResult(game, log, "us");
+    const them = nextPointIfResult(game, log, "them");
+    return {
+      us,
+      them,
+      any: { ...us, od: null as OD | null, gameEnds: us.gameEnds && them.gameEnds },
+    };
+  }, [game, log]);
   if (!previews) return null;
 
   const active = previews[tab];
@@ -1878,8 +1880,8 @@ function ContingencyLines({
         {active.genderRatio && <NextRatioBadge ratio={active.genderRatio} />}
       </div>
 
-      <div className="grid grid-cols-2 gap-2">
-        {(["us", "them"] as PointResult[]).map((outcome) => (
+      <div className="grid grid-cols-3 gap-2">
+        {CONTINGENCIES.map((outcome) => (
           <OutcomeTab
             key={outcome}
             label={OUTCOME_LABEL[outcome]}
@@ -1891,13 +1893,20 @@ function ContingencyLines({
         ))}
       </div>
 
+      {tab === "any" && (
+        <p className="text-xs text-faint">
+          Used whichever way the point goes — unless that outcome has a line of
+          its own, which wins.
+        </p>
+      )}
+
       {active.gameEnds && (
         <p className="text-xs text-muted">
           This result reaches the cap — there&rsquo;d be no next point.
         </p>
       )}
 
-      {(["us", "them"] as PointResult[]).map((outcome) => (
+      {CONTINGENCIES.map((outcome) => (
         <div key={outcome} className={tab === outcome ? "" : "hidden"}>
           <LineBuilder
             live={live}
@@ -1925,7 +1934,8 @@ function OutcomeTab({
   onClick,
 }: {
   label: string;
-  od: OD;
+  /** Null for "no matter what" — it has no single side. */
+  od: OD | null;
   picked: number;
   active: boolean;
   onClick: () => void;
@@ -1940,15 +1950,17 @@ function OutcomeTab({
           : "border-line text-muted"
       }`}
     >
-      <span className="flex items-center gap-1.5 font-medium">
+      <span className="flex flex-wrap items-center gap-1.5 font-medium">
         {label}
-        <span
-          className={`rounded px-1 text-[10px] font-semibold text-white ${
-            od === "O" ? "bg-red-600" : "bg-blue-600"
-          }`}
-        >
-          {od}
-        </span>
+        {od && (
+          <span
+            className={`rounded px-1 text-[10px] font-semibold text-white ${
+              od === "O" ? "bg-red-600" : "bg-blue-600"
+            }`}
+          >
+            {od}
+          </span>
+        )}
       </span>
       <span className="text-xs text-faint">{picked}/7 picked</span>
     </button>
