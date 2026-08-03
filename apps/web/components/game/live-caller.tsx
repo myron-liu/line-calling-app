@@ -14,6 +14,7 @@ import {
   playerSecondsPlayed,
   ratioCounts,
   ratioForPoint,
+  savedLineUsage,
   suggestedSituationTag,
   totalPlayedSeconds,
   validateLine,
@@ -744,6 +745,14 @@ function LineBuilder({
   const visibleQuickLines =
     tagFilter === "all" ? quickLines : quickLines.filter((x) => x.line.tags?.includes(tagFilter));
 
+  // How often each line/pod has been called *this game*, derived from the log.
+  // SavedLine.useCount is a lifetime tally across the whole tournament, which
+  // is the wrong number to read while calling a game.
+  const usageThisGame = useMemo(
+    () => savedLineUsage(points, savedLines),
+    [points, savedLines],
+  );
+
   // Filter chips: the fixed situational tags (always offered, in their canonical
   // order) followed by any custom tags this tournament's lines/pods actually
   // carry, so a team's own vocabulary is filterable too. Built off every saved
@@ -896,6 +905,7 @@ function LineBuilder({
         tagFilter={tagFilter}
         onTagFilterChange={setTagFilter}
         filterTags={filterTags}
+        usage={usageThisGame}
       />
 
       <div className="flex items-center justify-between text-sm">
@@ -1544,6 +1554,7 @@ function SavedLinesBar({
   tagFilter,
   onTagFilterChange,
   filterTags,
+  usage,
 }: {
   lines: QuickLine[];
   appliedIds: Set<string>;
@@ -1559,6 +1570,8 @@ function SavedLinesBar({
   onTagFilterChange: (tag: string) => void;
   /** Situational tags plus this tournament's own custom ones. */
   filterTags: string[];
+  /** Times each line/pod has been called this game, keyed by line id. */
+  usage: Record<string, number>;
 }) {
   return (
     <details
@@ -1625,7 +1638,7 @@ function SavedLinesBar({
                       {isPod ? `pod` : "line"}
                       {line.side && line.side !== "both" ? ` · ${line.side}` : ""}
                       {" · "}
-                      {mmp}M/{wmp}W · {line.useCount ?? 0}×
+                      {mmp}M/{wmp}W · {usage[line.id] ?? 0}× this game
                     </span>
                   </span>
                   {line.notes && (

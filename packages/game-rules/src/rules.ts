@@ -2,7 +2,15 @@
 // No I/O, no dates, no randomness: every function is a pure function of its inputs
 // so it can be exhaustively unit-tested and run identically on client and server.
 
-import type { GameCapMode, GenderRatio, OD, Game, Point, SituationTag } from "./types";
+import type {
+  GameCapMode,
+  GenderRatio,
+  OD,
+  Game,
+  Point,
+  SavedLine,
+  SituationTag,
+} from "./types";
 
 // ── Gender ratio (ABBA) — §5 ─────────────────────────────────────────────────
 
@@ -121,6 +129,38 @@ export function playerSecondsPlayed(points: Point[]): Record<string, number> {
     for (const id of p.lineup) seconds[id] = (seconds[id] ?? 0) + duration;
   }
   return seconds;
+}
+
+/**
+ * How many of this game's points each saved line/pod was actually called for.
+ *
+ * Matches the live caller's own "applied" test: a full seven counts when the
+ * point's starting lineup is exactly that set, a partial pod when the lineup
+ * contains all of it. Derived from the log rather than stored, so it stays
+ * honest through undo and retroactive line edits — unlike SavedLine.useCount,
+ * which is a lifetime tally across the whole tournament.
+ *
+ * Counts the in-progress point too: a line on the field has been called.
+ */
+export function savedLineUsage(
+  points: Point[],
+  lines: Pick<SavedLine, "id" | "playerIds">[],
+): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const line of lines) {
+    if (line.playerIds.length === 0) continue;
+    let used = 0;
+    for (const p of points) {
+      const onLine = new Set(p.lineup);
+      const everyone = line.playerIds.every((id) => onLine.has(id));
+      if (!everyone) continue;
+      // A full line has to *be* the line, not merely be contained in it.
+      if (line.playerIds.length === 7 && p.lineup.length !== 7) continue;
+      used++;
+    }
+    counts[line.id] = used;
+  }
+  return counts;
 }
 
 // ── Point outcomes (holds/breaks) — recap stats ─────────────────────────────

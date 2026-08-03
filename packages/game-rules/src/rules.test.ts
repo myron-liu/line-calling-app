@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   currentCapStatus,
+  savedLineUsage,
   strategyOutcomes,
   usedStrategyTags,
   offensiveEfficiency,
@@ -637,5 +638,55 @@ describe("strategyOutcomes", () => {
       pt(3, "O", "us", ["Zone", "Person"]),
     ];
     expect(usedStrategyTags(points)).toEqual(["Junk", "Person", "Zone"]);
+  });
+});
+
+describe("savedLineUsage", () => {
+  const pt = (n: number, lineup: string[]): Point => ({
+    id: `p${n}`,
+    gameId: "g",
+    pointNumber: n,
+    od: "O",
+    lineup,
+    result: "us",
+    isFirstAfterHalftime: false,
+  });
+  const full = ["a", "b", "c", "d", "e", "f", "g"];
+
+  test("counts a full line only when the point is exactly it", () => {
+    const lines = [{ id: "L", playerIds: full }];
+    const points = [
+      pt(1, full),
+      pt(2, ["a", "b", "c", "d", "e", "f", "z"]), // one swapped out
+      pt(3, full),
+    ];
+    expect(savedLineUsage(points, lines)["L"]).toBe(2);
+  });
+
+  test("counts a pod whenever all of it is on the line", () => {
+    const lines = [{ id: "P", playerIds: ["a", "b", "c"] }];
+    const points = [
+      pt(1, full), // contains a,b,c
+      pt(2, ["a", "b", "x", "y", "z", "w", "v"]), // missing c
+      pt(3, ["c", "b", "a", "q", "r", "s", "t"]),
+    ];
+    expect(savedLineUsage(points, lines)["P"]).toBe(2);
+  });
+
+  test("counts the point still being played", () => {
+    const inProgress: Point = { ...pt(1, full), result: undefined };
+    expect(savedLineUsage([inProgress], [{ id: "L", playerIds: full }])["L"]).toBe(1);
+  });
+
+  test("reports zero for a line never called, and skips an empty one", () => {
+    const usage = savedLineUsage(
+      [pt(1, full)],
+      [
+        { id: "unused", playerIds: ["x", "y"] },
+        { id: "empty", playerIds: [] },
+      ],
+    );
+    expect(usage["unused"]).toBe(0);
+    expect(usage["empty"]).toBeUndefined();
   });
 });
