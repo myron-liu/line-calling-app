@@ -1086,10 +1086,16 @@ export function GameList({
   const [deleting, setDeleting] = useState<Game | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  // Chronological by scheduled date/time — games missing either (not yet
-  // pinned down) sort to the end rather than arbitrarily to the front.
+  // Still-to-play games first, chronologically — that's what a coach is
+  // looking for mid-tournament. Finished ones drop to the bottom (in the same
+  // order) rather than sitting in the middle of the schedule. Games missing a
+  // date or time sort to the end of their group rather than arbitrarily to
+  // the front.
   const sortedList = useMemo(() => {
     return [...list].sort((a, b) => {
+      const doneA = a.status === "completed" ? 1 : 0;
+      const doneB = b.status === "completed" ? 1 : 0;
+      if (doneA !== doneB) return doneA - doneB;
       const dateA = a.gameDate ?? "";
       const dateB = b.gameDate ?? "";
       if (dateA !== dateB) {
