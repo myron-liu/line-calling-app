@@ -672,7 +672,7 @@ const STAT_COLUMNS: {
 
 function NumCell({ children }: { children: React.ReactNode }) {
   return (
-    <td className="border-b border-line py-1 text-right tabular-nums text-muted">
+    <td className="border-b border-line px-1 py-1 text-right tabular-nums text-muted">
       {children}
     </td>
   );
@@ -726,7 +726,7 @@ function formatPercent(ratio: number | null): string {
 function StatCell({ value }: { value: number }) {
   return (
     <td
-      className={`border-b border-line py-1 text-right tabular-nums ${
+      className={`border-b border-line px-1 py-1 text-right tabular-nums ${
         value === 0 ? "text-faint" : "text-fg"
       }`}
     >
@@ -799,13 +799,16 @@ function SortableTh({
   const active = sort.key === sortKey;
   return (
     <th
-      className={`whitespace-nowrap border-b border-line pb-1 ${align === "right" ? "text-right" : "text-left"} text-xs font-semibold uppercase tracking-wide ${toneClassName ?? "text-faint"}`}
+      className={`whitespace-nowrap border-b border-line ${align === "right" ? "text-right" : "text-left"} text-xs font-semibold uppercase tracking-wide ${toneClassName ?? "text-faint"}`}
     >
+      {/* The button fills the cell rather than hugging its label: these
+          headers are two or three characters wide, and a bare text-sized hit
+          area is most of a thumb too small to aim at on a phone. */}
       <button
         onClick={() => onSort(sortKey)}
         title={hint}
         aria-label={hint ? `${hint} — sort` : undefined}
-        className={`inline-flex items-center gap-0.5 whitespace-nowrap hover:text-fg ${
+        className={`flex min-h-11 w-full touch-manipulation items-center gap-0.5 px-1 hover:text-fg ${
           align === "right" ? "flex-row-reverse" : ""
         } ${active ? "text-fg" : ""}`}
       >
@@ -888,7 +891,7 @@ function PointsPlayedTable({
           const { p, count, oPointsPlayed, dPointsPlayed, oPlusMinus, dPlusMinus } = row;
           return (
           <tr key={p.playerId}>
-            <td className="border-b border-line py-1">{displayName(p)}</td>
+            <td className="border-b border-line px-1 py-1">{displayName(p)}</td>
             <NumCell>{count}</NumCell>
             <NumCell>{dPointsPlayed}</NumCell>
             <NumCell>{formatPlusMinus(dPlusMinus)}</NumCell>
