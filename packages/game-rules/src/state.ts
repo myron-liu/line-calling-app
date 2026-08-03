@@ -185,6 +185,7 @@ export function confirmLine(
   lineup: string[],
   pointId: string,
   startedAt?: string,
+  strategyTags?: string[],
 ): GameLogState {
   if (state.meta.endedManually) throw new Error("Game has ended");
   if (state.points.some((p) => p.result === undefined)) {
@@ -201,6 +202,9 @@ export function confirmLine(
     isFirstAfterHalftime: ctx.isFirstAfterHalftime,
     result: undefined,
     startedAt,
+    // Planned before the pull rather than tapped mid-point; still editable
+    // once the point is under way (§ strategy tags).
+    strategyTags: strategyTags?.length ? [...strategyTags] : undefined,
   };
   return { points: [...state.points, point], meta: state.meta };
 }
@@ -497,7 +501,13 @@ export function editPoint(
 /** How to reverse a one-step undo — replaying the exact reducer call it
  *  reverted, so redo() can just re-dispatch it instead of duplicating logic. */
 export type RedoAction =
-  | { type: "confirmLine"; lineup: string[]; pointId: string; startedAt?: string }
+  | {
+      type: "confirmLine";
+      lineup: string[];
+      pointId: string;
+      startedAt?: string;
+      strategyTags?: string[];
+    }
   | { type: "recordResult"; scorer: PointResult; endedAt?: string; scoring?: Scoring }
   | { type: "endGame" }
   | { type: "callHalftime" };
@@ -563,6 +573,7 @@ export function undoLastPoint(
       redo: {
         type: "confirmLine",
         lineup: last.lineup,
+        strategyTags: last.strategyTags,
         pointId: last.id,
         startedAt: last.startedAt,
       },
@@ -607,7 +618,14 @@ export function redoAction(
 ): GameLogState {
   switch (action.type) {
     case "confirmLine":
-      return confirmLine(game, state, action.lineup, action.pointId, action.startedAt);
+      return confirmLine(
+        game,
+        state,
+        action.lineup,
+        action.pointId,
+        action.startedAt,
+        action.strategyTags,
+      );
     case "recordResult":
       return recordResult(game, state, action.scorer, action.endedAt, action.scoring);
     case "endGame":

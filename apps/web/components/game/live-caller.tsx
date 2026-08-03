@@ -72,7 +72,15 @@ function formatClock(totalSeconds: number): string {
 }
 
 // The live line caller (§8). Drives the engine hook; only reads/writes localStorage.
-export function LiveCaller({ live }: { live: LiveGame }) {
+export function LiveCaller({
+  live,
+  initialLine,
+}: {
+  live: LiveGame;
+  /** A line built on the flip screen for the side the flip actually gave us
+   *  (see PreFlipLines) — seeds point 1 so the pull isn't spent picking. */
+  initialLine?: string[] | null;
+}) {
   const { state, carryOver, points, error } = live;
   // The next line prepared during the current point_in_progress phase (see
   // InProgressControls) — seeds the following point's LineBuilder the moment
@@ -84,6 +92,14 @@ export function LiveCaller({ live }: { live: LiveGame }) {
   // ContingencyLines), plus the one carried into the point that just opened.
   const [drafts, setDrafts] = useState<NextLineDrafts>(emptyNextLineDrafts);
   const [carriedLine, setCarriedLine] = useState<string[] | null>(null);
+  // Strategy chosen while building the line, applied at confirm. Cleared once
+  // the point is under way — from then on the in-point picker edits the
+  // point's own tags directly, and a stale plan here would silently re-apply
+  // to the next point.
+  const [plannedStrategy, setPlannedStrategy] = useState<string[]>([]);
+  useEffect(() => {
+    if (state.phase === "point_in_progress") setPlannedStrategy([]);
+  }, [state.phase]);
 
   // Whoever finished the last completed point — what "same line" means on the
   // awaiting_line screen, where the point in progress no longer exists.
@@ -139,12 +155,20 @@ export function LiveCaller({ live }: { live: LiveGame }) {
             // carryOver wins: it's only set right after an undo, and the line
             // being restored is more current than a contingency prepared
             // before the point that just got reverted.
-            seed={carryOver ?? (carriedLine?.length ? carriedLine : null)}
+            seed={
+              carryOver ??
+              (carriedLine?.length
+                ? carriedLine
+                : state.currentPointNumber === 1 && initialLine?.length
+                  ? initialLine
+                  : null)
+            }
             mode="confirm"
             pointNumber={state.currentPointNumber}
             genderRatio={state.genderRatio}
             od={state.od}
             sameLine={lastLineup}
+            plannedStrategy={{ tags: plannedStrategy, onChange: setPlannedStrategy }}
             replaySeed={replaySeed}
           />
         )}
@@ -409,7 +433,7 @@ const GENDER = {
 
 type SortMode = "roster" | "recency" | "playtime" | "minutes";
 
-function LineBuilder({
+export function LineBuilder({
   live,
   seed,
   mode,
@@ -417,6 +441,7 @@ function LineBuilder({
   genderRatio,
   od,
   onSelectionChange,
+  plannedStrategy,
   sameLine,
   replaySeed,
 }: {
@@ -440,6 +465,10 @@ function LineBuilder({
    *  side-tagged pods rank equally in its quick-lines bar. */
   od: OD | null;
   onSelectionChange?: (ids: string[]) => void;
+  /** Strategy planned for this point, applied when the line is confirmed.
+   *  Only wired up in "confirm" mode — a contingency line's strategy is
+   *  chosen when it actually becomes the point. */
+  plannedStrategy?: { tags: string[]; onChange: (tags: string[]) => void };
   /** The seven currently on the field, offered as a one-tap "Same line" in
    *  the contingency builders — only when they'd actually be a legal line
    *  for the point being prepared. */
@@ -1044,6 +1073,14 @@ function LineBuilder({
         onSave={(name) => actions.saveLine(name, selected)}
       />
 
+      {mode === "confirm" && plannedStrategy && (
+        <StrategyPicker
+          tags={plannedStrategy.tags}
+          vocabulary={live.strategyVocabulary}
+          onChange={plannedStrategy.onChange}
+        />
+      )}
+
       {mode === "confirm" && (
         <>
           <button
@@ -1055,7 +1092,7 @@ function LineBuilder({
               for (const line of savedLines) {
                 if (isLineApplied(line)) actions.recordLineUsage(line.id);
               }
-              actions.confirmLine(selected);
+              actions.confirmLine(selected, plannedStrategy?.tags);
               // Confirming swaps the whole surface for the in-progress
               // controls, and the coach has usually scrolled well down the
               // roster to build the line — land them on the point clock and

@@ -172,7 +172,9 @@ export interface LiveGame {
   redoLabel: string | null;
   sync: SyncState;
   actions: {
-    confirmLine: (lineup: string[]) => void;
+    /** `strategyTags` is planned before the pull (see the line builder's
+     *  Strategy picker); still editable once the point is under way. */
+    confirmLine: (lineup: string[], strategyTags?: string[]) => void;
     /** `scoring` is the optional goal/Callahan detail captured by the
      *  "We scored" modal; only meaningful when scorer is "us". */
     recordResult: (scorer: PointResult, scoring?: Scoring) => void;
@@ -533,17 +535,18 @@ export function useLiveGame(gameId: string): LiveGameResult {
 
   const actions = useMemo(
     () => ({
-      confirmLine: (lineup: string[]) =>
+      confirmLine: (lineup: string[], strategyTags?: string[]) =>
         run(() => {
           if (!game || !log) return;
           const pointId = newId();
           // The game clock for this point starts now (see confirmLine's
           // startedAt in state.ts) — stopped by recordResult below.
           const startedAt = new Date().toISOString();
-          commit(confirmLine(game, log, lineup, pointId, startedAt), "confirmLine", {
-            pointId,
-            lineup,
-          });
+          commit(
+            confirmLine(game, log, lineup, pointId, startedAt, strategyTags),
+            "confirmLine",
+            { pointId, lineup, strategyTags },
+          );
           setCarryOver(null);
         }),
       recordResult: (scorer: PointResult, scoring?: Scoring) =>

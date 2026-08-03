@@ -10,6 +10,7 @@ import type {
   PlayerPointOutcomes,
   PlayerStatTotals,
   PointEdit,
+  GenderRatio,
 } from "@shared/game-rules";
 import {
   defensiveEfficiency,
@@ -25,7 +26,7 @@ import { readTeam } from "@/lib/storage/teams";
 import { findTournament } from "@/lib/storage/tournaments";
 import { displayName } from "@/lib/player-display";
 import type { RosterSnapshotEntry } from "@/lib/storage/gameLog";
-import { LiveCaller } from "./live-caller";
+import { LineBuilder, LiveCaller } from "./live-caller";
 import { PointEditModal } from "./point-edit-modal";
 import { StrategySummary } from "./live-caller";
 
@@ -33,6 +34,9 @@ import { StrategySummary } from "./live-caller";
 // phase from the engine.
 export function GameScreen({ gameId }: { gameId: string }) {
   const result = useLiveGame(gameId);
+  // Survives the scheduled → in_progress transition, when FlipResultForm
+  // unmounts and the live caller takes over.
+  const [preparedFirstLine, setPreparedFirstLine] = useState<string[] | null>(null);
 
   if (result.status === "loading") {
     return <p className="text-muted">Loading game…</p>;
@@ -54,12 +58,12 @@ export function GameScreen({ gameId }: { gameId: string }) {
       <BackLink game={live.game} />
       <SyncBar live={live} />
       {live.game.status === "scheduled" ? (
-        <FlipResultForm live={live} />
+        <FlipResultForm live={live} onPrepared={setPreparedFirstLine} />
       ) : live.state.phase === "completed" ? (
         <Recap live={live} />
       ) : (
         // awaiting_line + point_in_progress are both handled inside the caller.
-        <LiveCaller live={live} />
+        <LiveCaller live={live} initialLine={preparedFirstLine} />
       )}
     </div>
   );
@@ -69,8 +73,17 @@ export function GameScreen({ gameId }: { gameId: string }) {
 // actually decided — field side, team color, starting O/D, and (for mixed
 // teams) which gender majority starts the first point are usually only known
 // at that point, not at creation time (§ create-game-form).
-function FlipResultForm({ live }: { live: LiveGame }) {
+function FlipResultForm({
+  live,
+  onPrepared,
+}: {
+  live: LiveGame;
+  /** Hands the line prepared for whichever side the flip gave us to the live
+   *  caller, so point 1 opens with it already picked. */
+  onPrepared: (lineup: string[]) => void;
+}) {
   const { game, actions } = live;
+  const [drafts, setDrafts] = useState<Record<OD, string[]>>({ O: [], D: [] });
   const [isMixed, setIsMixed] = useState(false);
   const [fieldSide, setFieldSide] = useState<"left" | "right">("left");
   const [teamColor, setTeamColor] = useState<"light" | "dark">("light");
@@ -89,6 +102,7 @@ function FlipResultForm({ live }: { live: LiveGame }) {
     setSubmitting(true);
     setError(null);
     try {
+      onPrepared(drafts[startingOD]);
       await actions.resolveFlip({
         fieldSide,
         teamColor,
@@ -162,6 +176,15 @@ function FlipResultForm({ live }: { live: LiveGame }) {
         )}
       </div>
       {error && <p className="text-xs text-red-600 dark:text-red-400">{error}</p>}
+
+      <PreFlipLines
+        live={live}
+        isMixed={isMixed}
+        manMajorityFirst={manMajorityFirst}
+        drafts={drafts}
+        onDraftChange={(od, ids) => setDrafts((cur) => ({ ...cur, [od]: ids }))}
+      />
+
       <button
         onClick={submit}
         disabled={submitting}
@@ -170,6 +193,108 @@ function FlipResultForm({ live }: { live: LiveGame }) {
         {submitting ? "Starting…" : "Start game"}
       </button>
     </section>
+  );
+}
+
+/**
+ * Build the first line before the flip is called, one for each side it could
+ * give you — so the pull isn't spent picking seven names.
+ *
+ * In Mixed the first point's ratio is decided at the flip too, so these
+ * builders validate against whichever majority is currently selected above;
+ * changing that radio re-validates them. Whichever side the flip lands on,
+ * that draft is carried into point 1.
+ */
+function PreFlipLines({
+  live,
+  isMixed,
+  manMajorityFirst,
+  drafts,
+  onDraftChange,
+}: {
+  live: LiveGame;
+  isMixed: boolean;
+  manMajorityFirst: boolean;
+  drafts: Record<OD, string[]>;
+  onDraftChange: (od: OD, ids: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [side, setSide] = useState<OD>("O");
+
+  const genderRatio: GenderRatio | undefined = isMixed
+    ? manMajorityFirst
+      ? "4MMP_3WMP"
+      : "4WMP_3MMP"
+    : undefined;
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className="w-full rounded-lg border border-dashed border-line-strong py-2 text-sm font-medium text-muted"
+      >
+        + Prepare the first line
+      </button>
+    );
+  }
+
+  return (
+    <div className="space-y-3 rounded-lg border border-line p-3">
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold">First line</h2>
+        <button
+          onClick={() => setOpen(false)}
+          className="text-xs font-medium text-muted hover:text-fg"
+        >
+          Hide
+        </button>
+      </div>
+      <p className="text-xs text-faint">
+        Whichever side the flip gives you, that line is ready to confirm.
+      </p>
+
+      <div className="grid grid-cols-2 gap-2">
+        {(["O", "D"] as OD[]).map((od) => (
+          <button
+            key={od}
+            onClick={() => setSide(od)}
+            aria-pressed={side === od}
+            className={`rounded-lg border px-2 py-1.5 text-left text-sm ${
+              side === od
+                ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-500/10"
+                : "border-line text-muted"
+            }`}
+          >
+            <span className="flex items-center gap-1.5 font-medium">
+              If we start on
+              <span
+                className={`rounded px-1 text-[10px] font-semibold text-white ${
+                  od === "O" ? "bg-red-600" : "bg-blue-600"
+                }`}
+              >
+                {od}
+              </span>
+            </span>
+            <span className="text-xs text-faint">{drafts[od].length}/7 picked</span>
+          </button>
+        ))}
+      </div>
+
+      {(["O", "D"] as OD[]).map((od) => (
+        <div key={od} className={side === od ? "" : "hidden"}>
+          <LineBuilder
+            live={live}
+            seed={null}
+            mode="prepare"
+            pointNumber={1}
+            genderRatio={genderRatio}
+            od={od}
+            onSelectionChange={(ids) => onDraftChange(od, ids)}
+            replaySeed={null}
+          />
+        </div>
+      ))}
+    </div>
   );
 }
 

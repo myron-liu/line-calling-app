@@ -643,3 +643,31 @@ describe("nextPointIfResult", () => {
     expect(deriveLiveGameState(game, s.points, s.meta).phase).toBe("point_in_progress");
   });
 });
+
+describe("strategy planned at confirm time", () => {
+  const lineup = ["a", "b", "c", "d", "e", "f", "g"];
+
+  test("tags the point as it starts", () => {
+    const s = confirmLine(game, fresh(), lineup, "pt-1", undefined, ["Zone"]);
+    expect(s.points[0]!.strategyTags).toEqual(["Zone"]);
+  });
+
+  test("no tags planned leaves the field unset rather than empty", () => {
+    const s = confirmLine(game, fresh(), lineup, "pt-1", undefined, []);
+    expect(s.points[0]!.strategyTags).toBeUndefined();
+  });
+
+  test("survives undo and redo of the confirm", () => {
+    const s = confirmLine(game, fresh(), lineup, "pt-1", undefined, ["Zone", "Cup"]);
+    const undone = undoLastPoint(game, s);
+    expect(undone.points).toHaveLength(0);
+    const redone = redoAction(game, undone, undone.redo);
+    expect(redone.points[0]!.strategyTags).toEqual(["Zone", "Cup"]);
+  });
+
+  test("stays editable once the point is under way", () => {
+    let s = confirmLine(game, fresh(), lineup, "pt-1", undefined, ["Zone"]);
+    s = editPoint(game, s, "pt-1", { strategyTags: ["Person"] });
+    expect(s.points[0]!.strategyTags).toEqual(["Person"]);
+  });
+});
