@@ -39,6 +39,9 @@ export const keys = {
   gameLastSync: (gameId: string) => `${prefix}:game:${gameId}:last-sync`,
   /** Reusable saved lines / pods, scoped to a tournament (§4.3). */
   savedLines: (tournamentId: string) => `${prefix}:tournament:${tournamentId}:saved-lines`,
+  /** How many points ahead the live caller's planner shows — a per-coach
+   *  preference, so it sticks across games rather than resetting each time. */
+  planDepth: `${prefix}:plan-depth`,
   /** Pending mutations awaiting sync to the Bun server. */
   outbox: `${prefix}:outbox`,
 } as const;

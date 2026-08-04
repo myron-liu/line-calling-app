@@ -41,12 +41,19 @@ import {
 import { Modal } from "@/components/modal";
 import {
   CONTINGENCIES,
+  DEFAULT_PLAN_DEPTH,
   OUTCOME_LABEL,
-  emptyNextLineDrafts,
+  PLAN_DEPTHS,
   lineForResult,
+  planFor,
+  prunePlans,
+  setPlan,
   type ContingencyKey,
   type NextLineDrafts,
+  type PointPlans,
 } from "@/lib/game/contingency";
+import { keys } from "@/lib/storage/keys";
+import { read, write } from "@/lib/storage/store";
 import { LineHistory } from "./game-line-history";
 
 // ── Game clock (§8) ──────────────────────────────────────────────────────────
@@ -82,16 +89,19 @@ export function LiveCaller({
   initialLine?: string[] | null;
 }) {
   const { state, carryOver, points, error } = live;
-  // The next line prepared during the current point_in_progress phase (see
-  // InProgressControls) — seeds the following point's LineBuilder the moment
-  // it opens, so confirming it is a single tap instead of rebuilding from
-  // scratch. A fresh point_in_progress phase always starts this empty (its
-  // embedded prepare-mode LineBuilder reports its own initial empty selection
-  // right on mount), so nothing stale can leak into a later point.
-  // A line prepared for each outcome of the point in progress (see
-  // ContingencyLines), plus the one carried into the point that just opened.
-  const [drafts, setDrafts] = useState<NextLineDrafts>(emptyNextLineDrafts);
+  // Lines planned for upcoming points, keyed by point number (see
+  // NextUpPlanner), plus the one carried into the point that just opened.
+  const [plans, setPlans] = useState<PointPlans>({});
+  const [depth, setDepth] = useState(() =>
+    read<number>(keys.planDepth, DEFAULT_PLAN_DEPTH),
+  );
   const [carriedLine, setCarriedLine] = useState<string[] | null>(null);
+
+  // Points already played can't be planned for any more, and leaving them
+  // around would let a stale plan resurface if an undo moved the numbering.
+  useEffect(() => {
+    setPlans((cur) => prunePlans(cur, state.currentPointNumber - 1));
+  }, [state.currentPointNumber]);
   // Strategy chosen while building the line, applied at confirm. Cleared once
   // the point is under way — from then on the in-point picker edits the
   // point's own tags directly, and a stale plan here would silently re-apply
@@ -175,11 +185,20 @@ export function LiveCaller({
         {state.phase === "point_in_progress" && (
           <InProgressControls
             live={live}
-            drafts={drafts}
-            onDraftChange={(outcome, ids) =>
-              setDrafts((cur) => ({ ...cur, [outcome]: ids }))
+            plans={plans}
+            onPlanChange={(pointNumber, outcome, ids) =>
+              setPlans((cur) => setPlan(cur, pointNumber, outcome, ids))
             }
-            onResultRecorded={(scorer) => setCarriedLine(lineForResult(drafts, scorer))}
+            depth={depth}
+            onDepthChange={(next) => {
+              setDepth(next);
+              write(keys.planDepth, next);
+            }}
+            onResultRecorded={(scorer) =>
+              setCarriedLine(
+                lineForResult(planFor(plans, state.currentPointNumber + 1), scorer),
+              )
+            }
             replaySeed={replaySeed}
           />
         )}
@@ -1779,14 +1798,18 @@ function SaveLineButton({
 
 function InProgressControls({
   live,
-  drafts,
-  onDraftChange,
+  plans,
+  onPlanChange,
+  depth,
+  onDepthChange,
   onResultRecorded,
   replaySeed,
 }: {
   live: LiveGame;
-  drafts: NextLineDrafts;
-  onDraftChange: (outcome: ContingencyKey, ids: string[]) => void;
+  plans: PointPlans;
+  onPlanChange: (pointNumber: number, outcome: ContingencyKey, ids: string[]) => void;
+  depth: number;
+  onDepthChange: (depth: number) => void;
   /** Fired alongside the result so the caller knows which contingency line
    *  to carry into the next point. */
   onResultRecorded: (scorer: PointResult) => void;
@@ -1853,114 +1876,214 @@ function InProgressControls({
 
       <SubstitutionFlow live={live} />
 
-      <ContingencyLines
+      <NextUpPlanner
         live={live}
-        drafts={drafts}
-        onDraftChange={onDraftChange}
+        plans={plans}
+        onPlanChange={onPlanChange}
+        depth={depth}
+        onDepthChange={onDepthChange}
         replaySeed={replaySeed}
       />
     </div>
   );
 }
 
-// ── Contingency lines (§ prepare next line) ─────────────────────────────────
+// ── Next-up planner (§ prepare next lines) ─────────────────────────────────
 
 /**
- * Two lines prepared at once, one per outcome — because which side we're on
- * next depends on who wins the point in progress (we score, we pull, so we're
- * on D). Each builder therefore gets its own O/D, which is what makes its
- * quick-lines bar sort the right side's pods first and pick a sensible
- * situational tag.
+ * Lines planned for the next few points, one row per point.
  *
- * Both stay mounted and are shown/hidden rather than swapped, so switching
- * between them doesn't discard a half-built line.
+ * Rows are keyed by absolute point number, so nothing shifts when a point
+ * ends — the list just starts drawing from the new next point and whatever
+ * was planned for the ones after it is already there.
+ *
+ * Only the very next point splits by outcome. Which side you're on is the
+ * only thing a result changes, and it's only knowable one point out: point
+ * N+2's side depends on N+1's result, which hasn't happened. Deeper rows are
+ * therefore a single "no matter what" line — cheap to fill, and honest, since
+ * a plan three points deep is usually overtaken by events anyway.
  */
-function ContingencyLines({
+function NextUpPlanner({
   live,
-  drafts,
-  onDraftChange,
+  plans,
+  onPlanChange,
+  depth,
+  onDepthChange,
   replaySeed,
 }: {
   live: LiveGame;
-  drafts: NextLineDrafts;
-  onDraftChange: (outcome: ContingencyKey, ids: string[]) => void;
+  plans: PointPlans;
+  onPlanChange: (pointNumber: number, outcome: ContingencyKey, ids: string[]) => void;
+  depth: number;
+  onDepthChange: (depth: number) => void;
   replaySeed: { nonce: number; lineup: string[] } | null;
 }) {
-  const { game, log } = live;
+  const { game, log, state } = live;
+  const nextPointNumber = state.currentPointNumber + 1;
+  const [expanded, setExpanded] = useState(nextPointNumber);
   const [tab, setTab] = useState<ContingencyKey>("us");
 
-  // Both previews come from the engine running the real recordResult, so
-  // halftime and the ABBA ratio are handled for us (see nextPointIfResult).
-  // The "no matter what" tab shares their point number and ratio — only the
-  // side differs between outcomes — and carries no side of its own.
+  // Both come from the engine running the real recordResult, so halftime and
+  // the ABBA ratio are handled by the code that owns them.
   const previews = useMemo(() => {
     if (!log) return null;
-    const us = nextPointIfResult(game, log, "us");
-    const them = nextPointIfResult(game, log, "them");
     return {
-      us,
-      them,
-      any: { ...us, od: null as OD | null, gameEnds: us.gameEnds && them.gameEnds },
+      us: nextPointIfResult(game, log, "us"),
+      them: nextPointIfResult(game, log, "them"),
     };
   }, [game, log]);
   if (!previews) return null;
 
-  const active = previews[tab];
+  const rows = Array.from({ length: depth }, (_, i) => {
+    const pointNumber = nextPointNumber + i;
+    return {
+      pointNumber,
+      // Only the immediate next point has a knowable side.
+      splitsByOutcome: i === 0,
+      genderRatio: game.startingGenderRatio
+        ? ratioForPoint(pointNumber, game.startingGenderRatio)
+        : undefined,
+    };
+  });
 
   return (
     <div className="space-y-3 border-t border-line pt-3">
       <div className="flex items-center justify-between gap-2">
-        <h2 className="text-sm font-semibold">
-          Prepare next line{" "}
-          <span className="font-normal text-faint">· Point {active.pointNumber}</span>
-        </h2>
-        {active.genderRatio && <NextRatioBadge ratio={active.genderRatio} />}
-      </div>
-
-      <div className="grid grid-cols-3 gap-2">
-        {CONTINGENCIES.map((outcome) => (
-          <OutcomeTab
-            key={outcome}
-            label={OUTCOME_LABEL[outcome]}
-            od={previews[outcome].od}
-            picked={drafts[outcome].length}
-            active={tab === outcome}
-            onClick={() => setTab(outcome)}
-          />
-        ))}
-      </div>
-
-      {tab === "any" && (
-        <p className="text-xs text-faint">
-          Used whichever way the point goes — unless that outcome has a line of
-          its own, which wins.
-        </p>
-      )}
-
-      {active.gameEnds && (
-        <p className="text-xs text-muted">
-          This result reaches the cap — there&rsquo;d be no next point.
-        </p>
-      )}
-
-      {CONTINGENCIES.map((outcome) => (
-        <div key={outcome} className={tab === outcome ? "" : "hidden"}>
-          <LineBuilder
-            live={live}
-            seed={null}
-            mode="prepare"
-            pointNumber={previews[outcome].pointNumber}
-            genderRatio={previews[outcome].genderRatio}
-            od={previews[outcome].od}
-            onSelectionChange={(ids) => onDraftChange(outcome, ids)}
-            sameLine={live.state.currentLineup}
-            // Only the visible builder should swallow a replayed line.
-            replaySeed={tab === outcome ? replaySeed : null}
-          />
+        <h2 className="text-sm font-semibold">Next up</h2>
+        <div className="flex items-center gap-1 text-xs text-faint">
+          <span>Plan</span>
+          {PLAN_DEPTHS.map((d) => (
+            <button
+              key={d}
+              onClick={() => onDepthChange(d)}
+              aria-pressed={d === depth}
+              className={`min-h-8 min-w-8 rounded border px-1.5 ${
+                d === depth
+                  ? "border-emerald-500 font-medium text-emerald-700 dark:text-emerald-400"
+                  : "border-line"
+              }`}
+            >
+              {d}
+            </button>
+          ))}
         </div>
-      ))}
+      </div>
+
+      <ul className="space-y-2">
+        {rows.map((row) => {
+          const plan = planFor(plans, row.pointNumber);
+          const isOpen = expanded === row.pointNumber;
+          return (
+            <li
+              key={row.pointNumber}
+              className={`rounded-lg border ${
+                isOpen ? "border-line-strong" : "border-line"
+              }`}
+            >
+              <button
+                onClick={() => setExpanded(isOpen ? -1 : row.pointNumber)}
+                className="flex min-h-11 w-full items-center justify-between gap-2 px-2.5 text-left text-sm"
+              >
+                <span className="flex items-center gap-2">
+                  <span className="font-medium">Point {row.pointNumber}</span>
+                  {row.genderRatio && (
+                    <span className="text-xs text-faint">
+                      {ratioCounts(row.genderRatio).mmp}M/
+                      {ratioCounts(row.genderRatio).wmp}W
+                    </span>
+                  )}
+                </span>
+                <span className="text-xs text-faint">
+                  {row.splitsByOutcome
+                    ? summariseSplit(plan, previews)
+                    : plan.any.length > 0
+                      ? `${plan.any.length}/7 picked`
+                      : "—"}
+                </span>
+              </button>
+
+              {isOpen && (
+                <div className="space-y-3 border-t border-line p-2.5">
+                  {row.splitsByOutcome ? (
+                    <>
+                      <div className="grid grid-cols-3 gap-2">
+                        {CONTINGENCIES.map((outcome) => (
+                          <OutcomeTab
+                            key={outcome}
+                            label={OUTCOME_LABEL[outcome]}
+                            od={outcome === "any" ? null : previews[outcome].od}
+                            picked={plan[outcome].length}
+                            active={tab === outcome}
+                            onClick={() => setTab(outcome)}
+                          />
+                        ))}
+                      </div>
+                      {tab === "any" && (
+                        <p className="text-xs text-faint">
+                          Used whichever way the point goes — unless that
+                          outcome has a line of its own, which wins.
+                        </p>
+                      )}
+                      {CONTINGENCIES.map((outcome) => (
+                        <div key={outcome} className={tab === outcome ? "" : "hidden"}>
+                          <LineBuilder
+                            live={live}
+                            seed={plan[outcome]}
+                            mode="prepare"
+                            pointNumber={row.pointNumber}
+                            genderRatio={row.genderRatio}
+                            od={outcome === "any" ? null : previews[outcome].od}
+                            onSelectionChange={(ids) =>
+                              onPlanChange(row.pointNumber, outcome, ids)
+                            }
+                            sameLine={live.state.currentLineup}
+                            replaySeed={tab === outcome ? replaySeed : null}
+                          />
+                        </div>
+                      ))}
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-xs text-faint">
+                        Which side you&rsquo;re on this far out depends on
+                        results that haven&rsquo;t happened, so this line is
+                        used either way.
+                      </p>
+                      <LineBuilder
+                        live={live}
+                        seed={plan.any}
+                        mode="prepare"
+                        pointNumber={row.pointNumber}
+                        genderRatio={row.genderRatio}
+                        od={null}
+                        onSelectionChange={(ids) =>
+                          onPlanChange(row.pointNumber, "any", ids)
+                        }
+                        replaySeed={null}
+                      />
+                    </>
+                  )}
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
+}
+
+/** One-line summary of the next point's row, e.g. "D 7/7 · O — · any 4/7". */
+function summariseSplit(
+  plan: NextLineDrafts,
+  previews: { us: { od: OD }; them: { od: OD } },
+): string {
+  const parts = [
+    `${previews.us.od} ${plan.us.length || "—"}`,
+    `${previews.them.od} ${plan.them.length || "—"}`,
+  ];
+  if (plan.any.length) parts.push(`any ${plan.any.length}`);
+  return parts.join(" · ");
 }
 
 function OutcomeTab({

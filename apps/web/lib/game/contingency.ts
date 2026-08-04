@@ -38,3 +38,43 @@ export const OUTCOME_LABEL: Record<ContingencyKey, string> = {
 
 /** Display order of the contingency tabs. */
 export const CONTINGENCIES: ContingencyKey[] = ["us", "them", "any"];
+
+/**
+ * Lines planned for upcoming points, keyed by absolute point number.
+ *
+ * Keying by point number rather than by "how many points from now" is what
+ * makes the plan survive a point ending: when point 5 finishes, the planner
+ * simply starts drawing rows at 6, and whatever was planned for 6 and 7 is
+ * already sitting there under those keys. Nothing shifts.
+ */
+export type PointPlans = Record<number, NextLineDrafts>;
+
+export function planFor(plans: PointPlans, pointNumber: number): NextLineDrafts {
+  return plans[pointNumber] ?? emptyNextLineDrafts();
+}
+
+export function setPlan(
+  plans: PointPlans,
+  pointNumber: number,
+  outcome: ContingencyKey,
+  lineup: string[],
+): PointPlans {
+  return {
+    ...plans,
+    [pointNumber]: { ...planFor(plans, pointNumber), [outcome]: lineup },
+  };
+}
+
+/** Drop plans for points already played, so the object can't grow all game
+ *  and a stale plan can't resurface if the point numbering moves. */
+export function prunePlans(plans: PointPlans, throughPointNumber: number): PointPlans {
+  const kept: PointPlans = {};
+  for (const [key, drafts] of Object.entries(plans)) {
+    if (Number(key) > throughPointNumber) kept[Number(key)] = drafts;
+  }
+  return kept;
+}
+
+/** How many upcoming points the planner shows at once. */
+export const PLAN_DEPTHS = [1, 2, 3, 4] as const;
+export const DEFAULT_PLAN_DEPTH = 3;
