@@ -16,6 +16,8 @@ import {
   defensiveEfficiency,
   efficiencyFromPlusMinus,
   emptyStatTotals,
+  playerSecondsPlayed,
+  ratioCounts,
   offensiveEfficiency,
   playerPointOutcomes,
   playerStatTotals,
@@ -28,6 +30,7 @@ import { displayName } from "@/lib/player-display";
 import type { RosterSnapshotEntry } from "@/lib/storage/gameLog";
 import { LineBuilder, LiveCaller } from "./live-caller";
 import { PointEditModal } from "./point-edit-modal";
+import { csvFilename, csvPercent, downloadCsv, toCsv } from "@/lib/csv";
 import { StrategySummary } from "./live-caller";
 
 // One route, three surfaces (§16). The live caller and recap key off the derived
@@ -404,6 +407,28 @@ function Recap({ live }: { live: LiveGame }) {
         </button>
       )}
 
+      <div className="flex flex-wrap gap-2">
+        <button
+          onClick={() =>
+            downloadCsv(
+              csvFilename(game.opponentName, "players"),
+              recapPlayersCsv(roster, state.pointsPlayed, playerOutcomes, statTotals, points),
+            )
+          }
+          className="min-h-11 rounded-md border border-line-strong px-3 text-sm font-medium"
+        >
+          Players CSV
+        </button>
+        <button
+          onClick={() =>
+            downloadCsv(csvFilename(game.opponentName, "points"), recapPointsCsv(points, byId))
+          }
+          className="min-h-11 rounded-md border border-line-strong px-3 text-sm font-medium"
+        >
+          Points CSV
+        </button>
+      </div>
+
       <OverallStats outcomes={outcomes} />
 
       <StrategySummary points={points} />
@@ -425,6 +450,149 @@ function Recap({ live }: { live: LiveGame }) {
       />
     </section>
   );
+}
+
+/** This game's per-player figures — the recap table's columns, plus minutes,
+ *  which the table doesn't have room for. */
+function recapPlayersCsv(
+  roster: RosterSnapshotEntry[],
+  pointsPlayed: Record<string, number>,
+  playerOutcomes: Record<string, PlayerPointOutcomes>,
+  statTotals: Record<string, PlayerStatTotals>,
+  points: Point[],
+): string {
+  const seconds = playerSecondsPlayed(points);
+  const header = [
+    "Player",
+    "Gender",
+    "Role",
+    "Points",
+    "Minutes",
+    "O points",
+    "O%",
+    "O +/-",
+    "D points",
+    "D%",
+    "D +/-",
+    "Assists",
+    "Goals",
+    "Blocks",
+    "Turnovers",
+    "Callahans",
+  ];
+  const rows = [...roster]
+    .sort((a, b) => displayName(a).localeCompare(displayName(b)))
+    .map((p) => {
+      const o = playerOutcomes[p.playerId];
+      const st = statTotals[p.playerId] ?? emptyStatTotals();
+      const oPts = o?.oPointsPlayed ?? 0;
+      const dPts = o?.dPointsPlayed ?? 0;
+      const oPm = o?.oPlusMinus ?? 0;
+      const dPm = o?.dPlusMinus ?? 0;
+      return [
+        displayName(p),
+        p.genderMatch,
+        p.role,
+        pointsPlayed[p.playerId] ?? 0,
+        Math.round((seconds[p.playerId] ?? 0) / 60),
+        oPts,
+        csvPercent(efficiencyFromPlusMinus(oPts, oPm)),
+        oPm,
+        dPts,
+        csvPercent(efficiencyFromPlusMinus(dPts, dPm)),
+        dPm,
+        st.assists,
+        st.goals,
+        st.blocks,
+        st.turnovers,
+        st.callahans,
+      ];
+    });
+  return toCsv([header, ...rows]);
+}
+
+/**
+ * One row per point — the richest export, and the one that lets a coach ask
+ * questions the app doesn't answer yet ("how did we do in zone when Alex was
+ * on?"). Names rather than ids throughout, since this is read by a person.
+ */
+function recapPointsCsv(
+  points: Point[],
+  byId: Map<string, RosterSnapshotEntry>,
+): string {
+  const name = (id: string) => {
+    const p = byId.get(id);
+    return p ? displayName(p) : "Unknown";
+  };
+  let our = 0;
+  let their = 0;
+
+  const header = [
+    "Point",
+    "Started on",
+    "Ratio",
+    "Result",
+    "Outcome",
+    "Our score",
+    "Their score",
+    "Strategy",
+    "Line",
+    "Substitutions",
+    "Assist",
+    "Goal",
+    "Callahan",
+    "Blocks",
+    "Turnovers",
+    "Seconds",
+    "Notes",
+  ];
+
+  const rows = points.map((p) => {
+    if (p.result === "us") our++;
+    else if (p.result === "them") their++;
+    const outcome =
+      p.result === undefined
+        ? "in progress"
+        : p.od === "D"
+          ? p.result === "us"
+            ? "break"
+            : "opponent held"
+          : p.result === "us"
+            ? "hold"
+            : "broken";
+    const events = p.statEvents ?? [];
+    const duration =
+      p.startedAt && p.endedAt
+        ? Math.round(
+            (new Date(p.endedAt).getTime() - new Date(p.startedAt).getTime()) / 1000,
+          )
+        : "";
+    return [
+      p.pointNumber,
+      p.od,
+      p.genderRatio ? `${ratioCounts(p.genderRatio).mmp}M/${ratioCounts(p.genderRatio).wmp}W` : "",
+      p.result ?? "",
+      outcome,
+      our,
+      their,
+      (p.strategyTags ?? []).join(" | "),
+      p.lineup.map(name).join(" | "),
+      (p.substitutions ?? [])
+        .map((sub) => `${name(sub.injuredPlayerId)} -> ${name(sub.replacementPlayerId)}`)
+        .join(" | "),
+      p.scoring?.kind === "goal" && p.scoring.assistPlayerId
+        ? name(p.scoring.assistPlayerId)
+        : "",
+      p.scoring?.kind === "goal" ? name(p.scoring.goalPlayerId) : "",
+      p.scoring?.kind === "callahan" ? name(p.scoring.playerId) : "",
+      events.filter((e) => e.type === "block").map((e) => name(e.playerId)).join(" | "),
+      events.filter((e) => e.type === "turnover").map((e) => name(e.playerId)).join(" | "),
+      duration,
+      p.notes ?? "",
+    ];
+  });
+
+  return toCsv([header, ...rows]);
 }
 
 // ── Overall stats ────────────────────────────────────────────────────────────

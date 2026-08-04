@@ -15,6 +15,7 @@ import {
   type TournamentStats as TournamentStatsData,
 } from "@/lib/storage/tournaments";
 import { displayName } from "@/lib/player-display";
+import { csvFilename, csvPercent, downloadCsv, toCsv } from "@/lib/csv";
 
 type StatSortKey =
   | "name"
@@ -152,6 +153,23 @@ export function TournamentStats({ tournamentId }: { tournamentId: string }) {
           <StatTile label="O% (holds / O points)" value={formatPercent(offensiveEfficiency(stats))} />
           <StatTile label="D% (breaks / D points)" value={formatPercent(defensiveEfficiency(stats))} />
         </div>
+      </div>
+
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-semibold uppercase tracking-wide text-faint">
+          Players
+        </p>
+        <button
+          onClick={() =>
+            downloadCsv(
+              csvFilename(tournament.name, "stats"),
+              playerStatsCsv(stats),
+            )
+          }
+          className="min-h-11 rounded-md border border-line-strong px-3 text-sm font-medium"
+        >
+          Export CSV
+        </button>
       </div>
 
       <div className="flex gap-1 border-b border-line text-sm">
@@ -352,6 +370,73 @@ const COLUMN_GROUPS: { id: string; label: string; columns: StatColumn[] }[] = [
     ],
   },
 ];
+
+/**
+ * Every per-player figure in one sheet, including the ones the on-screen
+ * table leaves out.
+ *
+ * The UI splits into groups and drops plus/minus because a phone has no room;
+ * a spreadsheet has all the room in the world, so the export is deliberately
+ * wider than what's displayed rather than mirroring it.
+ */
+function playerStatsCsv(stats: TournamentStatsData): string {
+  const header = [
+    "Player",
+    "Nickname",
+    "Gender",
+    "Role",
+    "Points",
+    "Minutes",
+    "O points",
+    "O%",
+    "O +/-",
+    "D points",
+    "D%",
+    "D +/-",
+    "Assists",
+    "Goals",
+    "Blocks",
+    "Turnovers",
+    "Callahans",
+  ];
+  const rows = [...stats.players]
+    .sort((a, b) => displayName(a).localeCompare(displayName(b)))
+    .map((p) => [
+      p.name,
+      p.nickname ?? "",
+      p.genderMatch,
+      p.role,
+      p.pointsPlayed,
+      Math.round(p.secondsPlayed / 60),
+      p.oPointsPlayed,
+      csvPercent(efficiencyFromPlusMinus(p.oPointsPlayed, p.oPlusMinus)),
+      p.oPlusMinus,
+      p.dPointsPlayed,
+      csvPercent(efficiencyFromPlusMinus(p.dPointsPlayed, p.dPlusMinus)),
+      p.dPlusMinus,
+      p.assists,
+      p.goals,
+      p.blocks,
+      p.turnovers,
+      p.callahans,
+    ]);
+
+  // The team totals ride along under the player rows: a coach opening this
+  // wants "how did we do" next to "who did what", and a second file to
+  // reconcile is worse than one blank line.
+  const totals = [
+    [],
+    ["Team totals"],
+    ["Holds", stats.holds],
+    ["Broken", stats.broken],
+    ["Breaks", stats.breaks],
+    ["Opponent held", stats.opponentHolds],
+    ["O%", csvPercent(offensiveEfficiency(stats))],
+    ["D%", csvPercent(defensiveEfficiency(stats))],
+  ];
+
+  return toCsv([header, ...rows, ...totals]);
+}
 
 /** Minutes on the field, rounded — seconds are noise at this scale. */
 function formatMinutes(seconds: number): string {
