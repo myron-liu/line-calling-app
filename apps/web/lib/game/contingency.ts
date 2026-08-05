@@ -75,6 +75,20 @@ export function prunePlans(plans: PointPlans, throughPointNumber: number): Point
   return kept;
 }
 
-/** How many upcoming points the planner shows at once. */
-export const PLAN_DEPTHS = [1, 2, 3, 4] as const;
+/**
+ * How many upcoming points the planner shows at once. Any number the coach
+ * wants — some plan the next point, some map out a whole stretch.
+ *
+ * The upper bound isn't a design opinion, just a guard: a game can't run
+ * forever, and a stuck "+" shouldn't be able to mount hundreds of rows.
+ */
+export const MIN_PLAN_DEPTH = 1;
+export const MAX_PLAN_DEPTH = 25;
 export const DEFAULT_PLAN_DEPTH = 3;
+
+/** Keeps a depth in range, including when it arrives from stored state a
+ *  previous version wrote. */
+export function clampPlanDepth(depth: number): number {
+  if (!Number.isFinite(depth)) return DEFAULT_PLAN_DEPTH;
+  return Math.min(MAX_PLAN_DEPTH, Math.max(MIN_PLAN_DEPTH, Math.round(depth)));
+}

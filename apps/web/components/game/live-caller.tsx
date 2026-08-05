@@ -42,8 +42,10 @@ import { Modal } from "@/components/modal";
 import {
   CONTINGENCIES,
   DEFAULT_PLAN_DEPTH,
+  MAX_PLAN_DEPTH,
+  MIN_PLAN_DEPTH,
   OUTCOME_LABEL,
-  PLAN_DEPTHS,
+  clampPlanDepth,
   lineForResult,
   planFor,
   prunePlans,
@@ -93,7 +95,7 @@ export function LiveCaller({
   // NextUpPlanner), plus the one carried into the point that just opened.
   const [plans, setPlans] = useState<PointPlans>({});
   const [depth, setDepth] = useState(() =>
-    read<number>(keys.planDepth, DEFAULT_PLAN_DEPTH),
+    clampPlanDepth(read<number>(keys.planDepth, DEFAULT_PLAN_DEPTH)),
   );
   const [carriedLine, setCarriedLine] = useState<string[] | null>(null);
 
@@ -191,8 +193,9 @@ export function LiveCaller({
             }
             depth={depth}
             onDepthChange={(next) => {
-              setDepth(next);
-              write(keys.planDepth, next);
+              const clamped = clampPlanDepth(next);
+              setDepth(clamped);
+              write(keys.planDepth, clamped);
             }}
             onResultRecorded={(scorer) =>
               setCarriedLine(
@@ -1952,20 +1955,28 @@ function NextUpPlanner({
         <h2 className="text-sm font-semibold">Next up</h2>
         <div className="flex items-center gap-1 text-xs text-faint">
           <span>Plan</span>
-          {PLAN_DEPTHS.map((d) => (
-            <button
-              key={d}
-              onClick={() => onDepthChange(d)}
-              aria-pressed={d === depth}
-              className={`min-h-8 min-w-8 rounded border px-1.5 ${
-                d === depth
-                  ? "border-emerald-500 font-medium text-emerald-700 dark:text-emerald-400"
-                  : "border-line"
-              }`}
-            >
-              {d}
-            </button>
-          ))}
+          <button
+            onClick={() => onDepthChange(depth - 1)}
+            disabled={depth <= MIN_PLAN_DEPTH}
+            aria-label="Show one fewer point"
+            className="min-h-11 min-w-11 rounded border border-line text-base disabled:opacity-40"
+          >
+            −
+          </button>
+          <span
+            aria-live="polite"
+            className="min-w-8 text-center text-sm font-medium text-fg tabular-nums"
+          >
+            {depth}
+          </span>
+          <button
+            onClick={() => onDepthChange(depth + 1)}
+            disabled={depth >= MAX_PLAN_DEPTH}
+            aria-label="Show one more point"
+            className="min-h-11 min-w-11 rounded border border-line text-base disabled:opacity-40"
+          >
+            +
+          </button>
         </div>
       </div>
 

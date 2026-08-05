@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
+  DEFAULT_PLAN_DEPTH,
+  MAX_PLAN_DEPTH,
+  MIN_PLAN_DEPTH,
+  clampPlanDepth,
   emptyNextLineDrafts,
   lineForResult,
   planFor,
@@ -58,5 +62,24 @@ describe("point plans", () => {
     const pruned = prunePlans(plans, 5);
     expect(Object.keys(pruned)).toEqual(["6"]);
     expect(planFor(pruned, 5).any).toEqual([]);
+  });
+});
+
+describe("clampPlanDepth", () => {
+  test("keeps sensible values untouched", () => {
+    expect(clampPlanDepth(1)).toBe(1);
+    expect(clampPlanDepth(7)).toBe(7);
+    expect(clampPlanDepth(MAX_PLAN_DEPTH)).toBe(MAX_PLAN_DEPTH);
+  });
+
+  test("pulls out-of-range values back in", () => {
+    expect(clampPlanDepth(0)).toBe(MIN_PLAN_DEPTH);
+    expect(clampPlanDepth(-4)).toBe(MIN_PLAN_DEPTH);
+    expect(clampPlanDepth(9999)).toBe(MAX_PLAN_DEPTH);
+  });
+
+  test("survives junk from stored state", () => {
+    expect(clampPlanDepth(NaN)).toBe(DEFAULT_PLAN_DEPTH);
+    expect(clampPlanDepth(2.6)).toBe(3);
   });
 });
